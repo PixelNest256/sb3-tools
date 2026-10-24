@@ -1,371 +1,141 @@
-# SB3 Compressor
+# SB3 Tools
 
-A lossless compressor for Scratch / TurboWarp project files (`.sb3`).
+Browser-only utilities for **Scratch / TurboWarp `.sb3`** projects: three
+compressors and one analyzer. Everything runs inside the tab — there is no
+upload, no install, and no build step for the site itself.
 
-SB3 Compressor shrinks the `project.json` inside an `.sb3` file without
-changing how the project behaves:
+**Live site:** <https://pixelnest256.github.io/sb3-tools/>
+· Japanese: <https://pixelnest256.github.io/sb3-tools/ja/>
 
-- **ID shortening** — block IDs and the names of variables, lists, and
-  broadcasts are renamed to short generated IDs (`V1`, `L2`, `B3`, ...).
-- **Store cleanup** — variables and lists that are never displayed, written,
-  or read are removed. Hidden monitors alone do not keep a store alive.
-- **Initial-value cleanup** — saved initial values are blanked when every
-  script overwrites the store before reading it. Self-referential updates and
-  displayed/cloud stores are never touched.
-- **Unreachable cleanup** — blocks, comments, uncalled custom-block
-  definitions, and broadcast messages that no script uses are removed.
-  Free-floating workspace comments are kept as notes.
-- **Hidden default removal** — when a reporter block covers an input slot,
-  the editor default stored underneath it is dropped.
-- **Duplicate extraction** — identical code sequences are moved into a new,
-  uniquely named custom block when doing so reduces the block count and JSON
-  size. There is no fixed minimum length, so short repeated snippets are
-  shared too as long as they pay for the definition overhead; sequences that
-  occur three or more times are collected into a single definition. When the
-  repeated code uses arguments of the enclosing custom block, the new block
-  takes those arguments and each caller passes the original argument values
-  through.
-- **Near-duplicate extraction** — single-block patterns that match except for
-  literal inputs (numbers or text) are shared as well. The differing literals
-  become arguments of the generated custom block, so every call keeps its own
-  value. Dropdown fields are part of the block identity and are never turned
-  into arguments.
-- **Loop shortcuts** — consecutive identical block groups are replaced by a
-  `repeat` loop when that removes at least two blocks and shrinks the JSON.
-- **Single-use definition inlining** — a non-warp custom block that is called
-  exactly once is moved to its call site and its definition is removed.
-- **No-op removal** — custom-block definitions that do nothing (empty, or only
-  `stop this script`) are deleted together with their calls, and broadcast
-  receivers that do nothing are deleted together with sends that no remaining
-  receiver can act on.
-- **Constant folding** — arithmetic reporter trees made only of numeric
-  literals are replaced by their result using JavaScript number semantics
-  (`1/0` → `Infinity`, `-1/0` → `-Infinity`; `0/0` is left alone, and
-  transcendental functions are not folded).
-- **Constant propagation** — reads of variables that are never written, or
-  whose every write stores the same literal, are replaced by that value when
-  the serialized JSON becomes smaller.
-- **Argument ID shortening** — custom-block argument IDs are renamed to short
-  generated IDs. Calls and prototypes repeat those IDs in their `mutation` and
-  as input keys, so this is one of the larger savings.
-- **Mutation cleanup** — legacy `tagName`/`children` keys left over from
-  Scratch 2 conversions are dropped when `children` is empty.
-- **Hidden monitor pruning** — a monitor that is hidden and that no
-  `show variable`/`show list` block can reveal is removed.
-- **Decimal rounding** — costume rotation centers with long fractional digits
-  are rounded to four decimals (a sub-pixel change in metadata only).
-- **`if-else` simplification** — an `if-else` block with no else branch is
-  converted to the smaller `if` block.
-- **Default stripping** — fields that the Scratch VM reconstructs
-  automatically (e.g. `volume: 100`, `visible: true`, `shadow: false`,
-  empty `inputs`/`fields`) are removed.
-- **Minification** — the JSON is re-serialized with no extra whitespace,
-  then repacked with all assets into a new `.sb3`.
+## The tools
 
-Two optional passes go beyond behavior preservation and are off by default:
+| Path | Tool | What it does |
+| --- | --- | --- |
+| `/sb3/` | **SB3 Compressor** | Shrinks `project.json` without changing behavior. Costumes and sounds are copied through untouched. |
+| `/media/` | **Media Compressor** | Re-encodes the costumes and sounds (PNG, JPEG, SVG, WAV, MP3). `project.json` is left byte-for-byte identical. |
+| `/full/` | **Full Compressor** | Runs both passes on one file and repacks once. |
+| `/analyzer/` | **Analyzer** | Reports where the bytes and blocks go, with warnings against Scratch's upload limits. Writes nothing. |
 
-- **Comment removal** (`strip_comments`) — deletes every workspace comment.
-  Comments never execute, but their text is lost.
-- **Workspace re-flow** (`compact_workspace`) — re-lays out top-level scripts
-  onto a compact grid. Columns and the top-to-bottom order are preserved; only
-  the editor layout changes.
+Each tool has an English page and a Japanese page (`…/ja/`). Use `docs/sb3/`,
+`docs/media/`, `docs/full/`, and `docs/analyzer/` when editing.
 
-Typical savings depend on the project, but JSON-heavy projects often shrink
-substantially with zero visual or behavioral difference in the editor.
+## What the compressors do
 
-There are two ways to run it: the Python tool below, or the browser version in
-`docs/sb3/`, which needs no install and can be published with GitHub Pages. A
-companion tool, the **media compressor** in `docs/media/`, re-encodes the
-costumes and sounds inside a project instead of its logic.
+### Project pass — `project.json` (behavior-preserving)
 
-## Requirements
+- **Rename** block IDs, variable/list names, broadcast names, and custom-block
+  proccodes/arguments to short generated IDs.
+- **Drop** default-valued fields the VM restores, hidden input defaults, unused
+  variables and lists, unreachable blocks/comments, uncalled definitions, and
+  dead broadcasts.
+- **Restructure** repeated or near-duplicate code into shared custom blocks,
+  consecutive repeats into `repeat` loops, empty `if-else` into `if`, and
+  single-use non-warp definitions inline.
+- **Fold** constant arithmetic and propagate stores that never change.
+- **Minify** the JSON and repack the zip.
 
-- Python 3.8 or later (standard library only)
-- Tkinter (bundled with standard CPython) — GUI mode only
+Every pass is kept only when the serialized JSON actually gets smaller, and the
+markers the Scratch VM relies on (an explicit `parent: null` and an
+end-of-stack `next: null`) are preserved.
 
-The browser version needs only a current browser; Python is not involved.
+### Media pass — costumes and sounds (lossy)
 
-## Usage
+| Asset | Treatment |
+| --- | --- |
+| PNG | Palette quantisation (2–256 colours, optional dithering) written as an indexed PNG, then a lossless **OxiPNG** pass. Transparency is preserved. |
+| JPEG | **MozJPEG** re-encode at a chosen quality. Pixel dimensions never change, so rotation centres stay valid. |
+| SVG | **SVGO** optimisation. |
+| WAV | Band-limited resampling, optional mono downmix, or transcoding to **MP3**. |
+| MP3 | ID3 tag stripping, or re-encode at a lower bitrate (mpg123 → LAME). |
 
-### GUI
+An asset is replaced only when the new bytes are actually smaller. File names
+and formats never change — so `project.json` stays what it was — **unless** a
+WAV sound is converted to MP3, in which case that asset's `md5ext` and
+`dataFormat` are updated.
 
-Run with no arguments:
+Media compression is spread across a pool of nested Web Workers (one per CPU
+core, up to 12), so projects with many costumes finish several times faster; it
+falls back to a single worker when nested workers are unavailable.
+
+### Analyzer
+
+- the **`project.json` size**, with a bar against Scratch's 5 MB limit;
+- **media bytes and asset counts per sprite** (share of bytes and share of
+  count), a warning for any asset over the 10 MB per-asset limit, a
+  largest-assets table, and a list of unreferenced files;
+- **block counts per sprite** with each sprite's share of the total.
+
+## Repository layout
+
+```
+docs/                 the whole site (GitHub Pages serves this folder)
+  index.html          landing page (English)      · stylesheet: home.css
+  ja/index.html       landing page (Japanese)
+  sb3/                SB3 Compressor   (+ ja/)
+  media/              Media Compressor (+ ja/)
+  full/               Full Compressor  (+ ja/)
+  analyzer/           Analyzer         (+ ja/)
+  .nojekyll           keeps Jekyll away from the folder
+  <tool>/             index.html · app.js · worker.js · styles.css · …
+                      media/ and full/ also carry vendor/ codecs
+build/media/          esbuild script that produces the vendored codecs (dev only)
+LICENSE               MIT
+```
+
+Only `build/media/` needs Node. The site is plain static files.
+
+## Vendored codecs
+
+`docs/media/vendor/` and `docs/full/vendor/` hold prebuilt browser bundles
+(plain IIFE scripts, loaded lazily). They are committed, so a normal checkout
+needs nothing else.
+
+| Bundle | Library | License |
+| --- | --- | --- |
+| `jpeg.js` + `mozjpeg_enc.wasm` | @jsquash/jpeg — MozJPEG | Apache-2.0 |
+| `oxipng.js` + `oxipng_bg.wasm` | @jsquash/oxipng — OxiPNG | Apache-2.0 |
+| `mp3.js` | wasm-media-encoders — LAME | MIT wrapper; LAME is LGPL-2.1 |
+| `mp3dec.js` | mpg123-decoder — mpg123 | MIT wrapper; mpg123 is LGPL-2.1 |
+| `svgo.js` | SVGO | MIT |
+
+See `docs/media/vendor/LICENSE.md` for details. To rebuild them:
 
 ```console
-python sb3_compressor.py
+cd build/media
+npm install
+node build.mjs
 ```
 
-Pick a `.sb3` (or a raw `project.json`) file, press **Start Compression**, then
-save the result when it finishes. The GUI exposes the main options.
-
-### CLI
-
-```console
-python sb3_compressor.py input.sb3 [output.sb3]
-```
-
-If the output path is omitted, `input_compressed.sb3` is written next to the
-input. The CLI uses the default options listed below.
-
-Example output:
-
-```text
-[load] Loading: myproject.sb3
-[parse] Parsing JSON...
-...
---------------------------------------------------------------
-Original project.json : 1,234.5 KB
-Compressed            : 456.7 KB  (63.0% smaller)
-Output file           : myproject_compressed.sb3 (1.1 MB)
-Details: blocks renamed 8421 / variables 12 / lists 3 / broadcasts 5
-         defaults removed 19032 / unused vars/lists removed 149 / custom blocks shortened 4 / monitors updated 4
-         unreachable blocks 771 / comments 5 / broadcasts 1 / obscured defaults 1250
-         initial values cleared 7 / duplicate groups 1 (14 blocks saved) / near-duplicates 1 (8 blocks saved)
-         loops 1 (6 blocks saved) / defs inlined 1 / folded values 5 / constant vars 2 (3 reads)
-         no-op defs 1 / no-op messages 1 / if-else simplified 0
-```
-
-Progress and summary messages are written in English.
-
-### Browser version (no install)
-
-`docs/` hosts four self-contained browser tools. The project compressor
-lives in `docs/sb3/`; the media compressor (costumes and sounds) lives in
-`docs/media/`; the full compressor (both passes at once) lives in
-`docs/full/`; and the analyzer (size and block report) lives in
-`docs/analyzer/`. `docs/index.html` is a landing page that links them, with a
-Japanese version at `docs/ja/index.html` (`/ja/`); `docs/home.css` styles both.
-Each tool has no build step and no server-side code: `index.html`, `styles.css`,
-`app.js`, `worker.js`, `compressor.js`, a vendored copy of JSZip, and a
-`ja/index.html` Japanese page.
-
-1. Open the page.
-2. Drop an `.sb3` file (or a raw `project.json`) onto it, or choose one.
-3. Wait for the readout, then press **Download**.
-
-Compression runs in a Web Worker, and every option from the table below is
-available on the page. The file never leaves the tab; there is no upload and no
-Python/Pyodide in the browser. Cancelling a run terminates the worker; the
-in-tab fallback cannot be interrupted once compression starts.
-
-Serving the page over HTTP is recommended, because the Web Worker keeps the
-interface responsive while a project is compressed. Opening `docs/sb3/index.html`
-directly from disk also works: browsers block workers on `file://` URLs, so the
-page detects that and compresses in the main tab instead. The tab will pause
-until the readout appears.
-
-The interface follows the operating system's light or dark preference by
-default. The **Light / Dark** switch in the header overrides it, and the choice
-is remembered in `localStorage`.
-
-The compressor's English page lives at `docs/sb3/index.html` (served at
-`/sb3/`) and its Japanese page at `docs/sb3/ja/index.html` (`/sb3/ja/`). The
-media compressor mirrors this at `docs/media/` (`/media/`) and
-`docs/media/ja/` (`/media/ja/`), and the full compressor at `docs/full/`
-(`/full/`) and `docs/full/ja/` (`/full/ja/`). Each tool's header switch moves
-between its own two languages, and the tool links move between the tools.
-
-To preview locally:
+## Preview locally
 
 ```console
 python -m http.server 8000 --directory docs
 ```
 
-Then open <http://localhost:8000/>.
+Then open <http://localhost:8000/>. Serving over HTTP is recommended, because
+the Web Worker keeps the page responsive while a project is compressed; opening
+the files directly from disk also works, but the page then compresses in the
+main tab instead.
 
-To publish with GitHub Pages, push the repository and set
-**Settings → Pages → Deploy from a branch → `main` / `docs`**. The tools are
-then served at `https://<user>.github.io/sb3-compressor/` (landing, Japanese at
-`.../ja/`), `.../sb3/`, `.../media/`, `.../full/`, and `.../analyzer/`.
-`docs/.nojekyll` keeps Jekyll out of the way.
+## Publishing
 
-The browser engine is a direct port of `sb3_compressor.py`. On the optional
-`test.sb3` fixture it produces the same `project.json` size and the same
-statistics as the Python build; the two outputs are deep-equal apart from JSON
-key order. Zip entries other than `project.json` are copied verbatim, so
-costumes and sounds are unchanged.
-
-### Media compressor
-
-`docs/media/` is a second, independent tool for the same kind of file. Instead
-of the project logic, it re-compresses the media, using vendored codecs:
-
-- **PNG** costumes are reduced to a palette (with optional dithering) and
-  written as indexed PNGs, then squeezed losslessly by **OxiPNG**. Transparent
-  pixels stay transparent.
-- **JPEG** costumes are re-encoded by **MozJPEG** at a chosen quality. Pixel
-  dimensions never change, so rotation centres stay valid.
-- **SVG** costumes are optimised by **SVGO**.
-- **WAV** sounds are resampled with a band-limited filter, downmixed, or
-  transcoded to **MP3** with the LAME encoder.
-- **MP3** sounds have their ID3 tags stripped, or are re-encoded at a lower
-  bitrate (mpg123 decode + LAME encode).
-
-It works in an *auto* mode (Light / Balanced / Strong presets, plus optional
-WAV→MP3, MP3 re-encode, and a PNG lossless pass that is off by default) or a
-*manual* mode that lists every asset and lets you pick a method for each one.
-Asset compression is spread across a pool of nested Web Workers (one per CPU
-core, up to 12), so large projects finish several times faster. File names and
-formats never change —
-`project.json` is copied through byte-for-byte — unless a WAV sound is converted
-to MP3, in which case that asset's `md5ext` and `dataFormat` are updated. This
-compression is lossy and irreversible; keep a copy of the original file.
-
-The codecs are prebuilt into `docs/media/vendor/` by `build/media/`
-(`npm install && node build.mjs`); the output is committed, so a normal checkout
-needs nothing else. See `docs/media/vendor/LICENSE.md` for attributions.
-
-### Full compressor
-
-`docs/full/` runs both passes on the same file, in one job:
-
-1. the media pass compresses costumes and sounds (across the worker pool) and
-   may rewrite `project.json` when a WAV sound is converted to MP3;
-2. the project pass then shrinks `project.json` with the same engine as the SB3
-   Compressor;
-3. the zip is repacked once.
-
-It reuses the two engines (`media.js` and `project.js`, copies of the other
-tools' engines) and the same `vendor/` codecs, and exposes the project
-compressor's option groups alongside the media strength and extras. Output is
-written as `*_full.sb3`. Use `docs/sb3/` or `docs/media/` instead when you want
-to tune one pass at a time.
-
-### Analyzer
-
-`docs/analyzer/` reads a project and reports where it spends its bytes, without
-changing anything:
-
-- the **project.json size**, with a bar against Scratch's 5 MB limit;
-- **media bytes and asset counts per sprite** (share of bytes and share of
-  count), with a warning for any asset over the 10 MB per-asset limit, plus a
-  largest-assets table and a list of files no costume or sound references;
-- **block counts per sprite** with each sprite's share of the total.
-
-It needs only JSZip (no WASM codecs, no worker) and writes nothing. Output is a
-report, not a file.
-
-### Tests
-
-```console
-python test_sb3_compressor.py
-python test_strict_sb3_compressor.py
-```
-
-The strict suite adds structural validation, determinism checks, and a seeded
-fuzz corpus. It also uses `test.sb3` and `repeat.sb3` when those optional
-project fixtures are present.
-
-## Options
-
-All options are on by default except `click_to_stage`.
-
-| Option | Default | Description |
-| --- | --- | --- |
-| `strip_defaults` | on | Remove fields the VM restores on load. |
-| `shorten_ids` | on | Rename block IDs and stores to short generated IDs. |
-| `remove_unused` | on | Drop variables/lists that are never referenced. |
-| `compress_procs` | on | Shorten custom block proccodes and argument names. |
-| `freq_ids` | on | Give the most frequently referenced blocks the shortest IDs. |
-| `drop_obscured_shadows` | on | Drop input defaults hidden under covering reporters. |
-| `remove_unreachable` | on | Remove unreachable blocks, comments, definitions, and messages. |
-| `clear_initial_values` | on | Blank provably overwritten variable/list initial values. |
-| `extract_duplicates` | on | Extract repeated block sequences into custom blocks. |
-| `near_duplicates` | on | Share blocks that differ only in literal inputs. |
-| `simplify_if_else` | on | Convert an `if-else` without an else branch to `if`. |
-| `remove_noops` | on | Remove empty definitions, calls, and dead broadcast receivers. |
-| `inline_single_call` | on | Inline non-warp definitions called exactly once. |
-| `fold_constants` | on | Fold arithmetic on numeric literals. |
-| `loop_duplicates` | on | Replace adjacent identical groups with `repeat` loops. |
-| `propagate_constants` | on | Replace reads of constant stores with their value. |
-| `click_to_stage` | off | Rewrite sprite-click hats into stage-click hats. **Changes behavior.** |
-| `strip_comments` | off | Delete every workspace comment. **Their text is lost.** |
-| `compact_workspace` | off | Re-flow top-level scripts onto a compact grid. |
-
-## How it works
-
-1. Read the `.sb3` zip and parse `project.json`.
-2. Remove input defaults hidden under covering reporter blocks, then prune
-   unreachable scripts, uncalled definitions, unused broadcast receivers and
-   messages, and comments anchored to removed blocks.
-3. Walk every target and collect variable / list / broadcast definitions,
-   then analyze reads, writes, display state, monitors, and initial values.
-4. Remove dead stores, blank provably overwritten initial values, then run the
-   structural simplification passes: `if-else` → `if`, no-op definition and
-   message removal, single-call inlining, constant propagation, numeric
-   folding, and consecutive-duplicate loopization.
-5. Rename all block IDs by traversing each script from its top-level block,
-   remapping `parent`/`next`/input references, monitor IDs, and comment
-   anchors.
-6. Extract repeated block sequences into unique custom blocks when the result
-   is smaller, share near-duplicate single blocks by passing their differing
-   literals as arguments, then shorten custom-block names and arguments.
-7. Drop default-valued fields that the VM restores on load.
-8. Serialize compactly and repack the zip (assets are stored verbatim).
-
-The result loads normally in Scratch and TurboWarp. Note that compressed
-projects are not meant to be round-tripped back to "pretty" names — original
-IDs and names are not recoverable from the output file.
-
-## Compatibility
-
-The compressor keeps two details that the Scratch VM's interpreter relies on:
-
-- Top-level blocks keep an explicit `"parent": null`.
-- Reachable blocks at the end of a stack keep an explicit `"next": null`.
-
-`Blocks.getTopLevelScript()` and the interpreter's Promise-resolution path
-compare these fields against `null`; a missing key (`undefined`) can cause a
-crash or re-execute a Promise-returning block every frame. The compiler path
-tolerates the omission, so both compiler and interpreter modes are covered by
-the test suite.
-
-The output has been differentially tested against TurboWarp's `scratch-vm`
-with the compiler enabled and disabled, running the original and compressed
-project side by side in a deterministic 900-frame scenario. Per-frame state,
-broadcasts, questions/answers, and text-to-speech requests were identical.
+GitHub Pages is set to **Deploy from a branch → `main` / `docs`**. Push to
+`main` and the site rebuilds at
+`https://<user>.github.io/sb3-tools/` (Japanese at `/ja/`).
 
 ## Notes & caveats
 
-- Cloud variables keep their `☁` prefix; only the name after the prefix is
-  shortened.
-- A store that is only shown through a hidden monitor and has no reading or
-  writing block is treated as dead. Free-floating workspace comments are kept.
-- Initial values are cleared only when the analysis is sure the old value is
-  never observed; visible monitors and cloud variables are excluded.
-- Duplicate extraction keeps an extraction only when both the block count and
-  serialized JSON shrink; candidates that would grow the JSON are skipped and
-  the next-best candidate is tried. There is no fixed minimum sequence length,
-  but very short repeats usually cost more in definition/call overhead than
-  they save and are rejected by that check. Argument-using code is only
-  extracted when every occurrence belongs to the same custom-block definition;
-  those arguments become parameters of the generated block. Code from a "run
-  without screen refresh" (warp) definition is only moved into another warp
-  definition, preserving refresh timing.
-- Near-duplicate extraction is limited to one stack block and its reporter
-  subtree per candidate. Only literal input slots can become arguments; a
-  difference in a dropdown field (for example the trigonometric function of
-  `operator_mathop`) means the blocks are not merged, because Scratch has no
-  way to evaluate a reporter in a field slot. The pass is also guarded by the
-  same "blocks and JSON must both shrink" check as duplicate extraction.
-- Numeric folding follows JavaScript arithmetic, because that is what the
-  Scratch VM uses. Division by zero produces `Infinity`/`-Infinity`, while
-  `NaN` results (`0/0`) and transcendental functions are left for the VM to
-  evaluate.
-- Loopization only merges copies that are adjacent in the same script, and it
-  keeps the loop only when the serialized JSON actually shrinks.
-- Single-call inlining never touches warp definitions, definitions with
-  arguments, or bodies containing `stop this script`, and it never inlines
-  into a warp caller.
-- Constant propagation skips displayed, cloud, monitored, sensed, and
-  extension-touched stores. A variable whose reading is only possible before
-  its first write keeps its original value, because only dominated reads are
-  replaced.
-- The optional *"sprite click → stage click"* option rewrites
-  `event_whenthisspriteclicked` blocks into `event_whenstageclicked`. This
-  changes behavior and is off by default.
-- Always keep a backup of your original `.sb3`. The tool is careful, but
-  this is a one-way transformation.
+- **Media compression is lossy and irreversible.** Always keep a copy of the
+  original `.sb3`. The project pass is one-way too: original IDs and names are
+  not recoverable from the output.
+- Scratch's upload limits are 5 MB for `project.json` and 10 MB per asset; the
+  analyzer flags anything over those. There is no limit on the number of assets.
+- The PNG lossless pass (OxiPNG) is the slowest step and is off by default; the
+  toggle trades a little speed for roughly 10% smaller PNGs.
+- Audio: Scratch only plays WAV and MP3, so WAV is either resampled or
+  transcoded to MP3 — never to a format Scratch cannot load.
+- Opening a page from disk (`file://`) disables Web Workers, so the tools fall
+  back to running in the main tab.
 
 ## License
 

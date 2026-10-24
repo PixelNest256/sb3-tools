@@ -1,11 +1,7 @@
-# Byte-compiled / cache
-__pycache__/
-*.py[cod]
-
 # Scratch projects (never commit user projects)
 *.sb3
 
-# Vendor build dependencies (the generated vendor/ output is committed)
+# Vendored build dependencies (the generated vendor/ output is committed)
 build/**/node_modules/
 
 # OS artifacts

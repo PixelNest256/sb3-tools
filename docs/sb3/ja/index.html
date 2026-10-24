@@ -46,7 +46,7 @@
         <button type="button" data-theme-set="dark">ダーク</button>
       </div>
       <span class="local-flag"><span class="dot" aria-hidden="true"></span>端末内のみ</span>
-      <a class="source-link" href="https://github.com/PixelNest256/sb3-compressor" rel="noopener">ソース&nbsp;↗</a>
+      <a class="source-link" href="https://github.com/PixelNest256/sb3-tools" rel="noopener">ソース&nbsp;↗</a>
     </div>
   </header>
 
@@ -58,7 +58,7 @@
         <p class="lead">
           使っていないデータを削り、ID を短くし、繰り返すコードをひとつに
           まとめます。書き出した <code>.sb3</code> は、これまでと同じ動作の
-          まま開けます。アップロードも Python もインストールも要りません。
+          まま開けます。アップロードもインストールも要りません。
         </p>
         <dl class="spec">
           <div><dt>読み込み</dt><dd>.sb3 / project.json</dd></div>
@@ -176,10 +176,12 @@
           <summary>動作の根拠</summary>
           <div class="notes-body">
             <p>
-              エンジンは、このリポジトリの Python CLI と同じ圧縮器です。構造、
-              決定性、ランダム生成したプロジェクト、そして TurboWarp の
-              <code>scratch-vm</code> との差分再生（コンパイラのオン／オフ）で
-              検証しています。
+              各パスは、書き出した <code>project.json</code> が実際に小さくなる
+              場合だけ採用します。Scratch VM が参照する値（明示的な
+              <code>parent: null</code> と、スタック末尾の
+              <code>next: null</code>）は保持します。出力は Scratch /
+              TurboWarp でこれまでと同じように開いて動きます。一方で戻せない
+              変換なので、元のファイルは必ず残してください。
             </p>
           </div>
         </details>
@@ -265,9 +267,7 @@
       ファイルは送信されません。
     </p>
     <p class="footer-links">
-      <a href="https://github.com/PixelNest256/sb3-compressor" rel="noopener">GitHub リポジトリ ↗</a>
-      <span aria-hidden="true">/</span>
-      <a href="https://github.com/PixelNest256/sb3-compressor/blob/main/sb3_compressor.py" rel="noopener">Python CLI</a>
+      <a href="https://github.com/PixelNest256/sb3-tools" rel="noopener">GitHub リポジトリ ↗</a>
       <span aria-hidden="true">/</span>
       <span>MIT ライセンス</span>
     </p>

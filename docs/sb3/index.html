@@ -46,7 +46,7 @@
         <button type="button" data-theme-set="dark">Dark</button>
       </div>
       <span class="local-flag"><span class="dot" aria-hidden="true"></span>Local only</span>
-      <a class="source-link" href="https://github.com/PixelNest256/sb3-compressor" rel="noopener">Source&nbsp;↗</a>
+      <a class="source-link" href="https://github.com/PixelNest256/sb3-tools" rel="noopener">Source&nbsp;↗</a>
     </div>
   </header>
 
@@ -58,7 +58,7 @@
         <p class="lead">
           Removes unused data, shortens IDs, and shares repeated code inside
           an <code>.sb3</code> file. The result opens and runs with the same
-          behavior — no upload, no Python, no install.
+          behavior — no upload, no install.
         </p>
         <dl class="spec">
           <div><dt>Reads</dt><dd>.sb3 / project.json</dd></div>
@@ -178,10 +178,12 @@
           <summary>Proof of behavior</summary>
           <div class="notes-body">
             <p>
-              The engine is the same compressor as the Python CLI in this
-              repository. Its test suite checks structure, determinism, fuzzed
-              projects, and differential playback against TurboWarp's
-              <code>scratch-vm</code> with the compiler both on and off.
+              Every pass is kept only when the serialized
+              <code>project.json</code> actually gets smaller, and the markers
+              the Scratch VM relies on (an explicit <code>parent: null</code>
+              and an end-of-stack <code>next: null</code>) are preserved. The
+              output opens and runs the same in Scratch and TurboWarp. Keep a
+              copy of the original file, because the transformation is one-way.
             </p>
           </div>
         </details>
@@ -267,9 +269,7 @@
       this tab; files are never uploaded.
     </p>
     <p class="footer-links">
-      <a href="https://github.com/PixelNest256/sb3-compressor" rel="noopener">GitHub repository ↗</a>
-      <span aria-hidden="true">/</span>
-      <a href="https://github.com/PixelNest256/sb3-compressor/blob/main/sb3_compressor.py" rel="noopener">Python CLI</a>
+      <a href="https://github.com/PixelNest256/sb3-tools" rel="noopener">GitHub repository ↗</a>
       <span aria-hidden="true">/</span>
       <span>MIT License</span>
     </p>

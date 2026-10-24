@@ -1,6 +1,6 @@
 /* SB3 Compressor — browser edition.
  * A behavior-preserving compressor for Scratch / TurboWarp .sb3 files.
- * This is a JavaScript port of sb3_compressor.py. It never uploads a project.
+ * Everything runs in the tab; it never uploads a project.
  */
 (function (root, factory) {
   "use strict";
@@ -71,7 +71,7 @@
     return JSON.parse(JSON.stringify(v));
   };
   const jsonLen = (s) => {
-    // Python's len() counts code points, so astral characters count once.
+    // Count code points, so astral characters count once.
     let n = s.length;
     for (let i = 0; i < s.length; i++) {
       const c = s.charCodeAt(i);
@@ -173,7 +173,7 @@
     const na = Number(a);
     const nb = Number(b);
     if (!Number.isNaN(na) || !Number.isNaN(nb)) return na === nb;
-    // Python falls back to a string comparison when float() raises.
+    // Fall back to a string comparison when the numeric cast fails.
     return String(a) === String(b);
   }
 

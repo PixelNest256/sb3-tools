@@ -1,7 +1,7 @@
 /* SB3 Media Compressor — browser edition.
  * Compresses the images and sounds packed inside a Scratch / TurboWarp .sb3
  * file, then repacks the zip. Everything runs in the tab: no upload, no
- * server, no Python.
+ * server, no upload.
  *
  * Codecs (vendored under vendor/, loaded lazily):
  *   images : PNG  -> palette quantisation (own writer) + OxiPNG lossless pass
