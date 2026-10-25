@@ -104,6 +104,18 @@
           <button type="button" id="resetOptions" class="text-btn">初期値に戻す</button>
         </div>
 
+        <div class="preset-bar">
+          <span class="preset-label" id="preset-label">プリセット</span>
+          <div class="preset-list" role="group" aria-labelledby="preset-label">
+            <button type="button" class="preset-btn" data-preset="clean" aria-pressed="false" title="project.json を小さくするだけ。すべての変換をオフにします。">JSON クリーンアップのみ</button>
+            <button type="button" class="preset-btn" data-preset="safe" aria-pressed="false" title="内部 ID、未使用の変数、到達しないコード、隠れた既定値を削除。構造は変えません。">見た目変化なし</button>
+            <button type="button" class="preset-btn" data-preset="cleanup" aria-pressed="false" title="何もしないブロックの削除、if-else の簡略化、1回だけの定義の展開、定数の畳み込みも行います。">コードクリーンアップ</button>
+            <button type="button" class="preset-btn" data-preset="optimize" aria-pressed="true" title="繰り返すコードの抽出、似たコードの統合、繰り返しのループ化も行います。">コード最適化</button>
+            <button type="button" class="preset-btn" data-preset="max" aria-pressed="false" title="コメントの削除とブロック配置の再構成を含む、すべてのオプション。">最大</button>
+            <span class="preset-custom" id="presetCustom" role="status" hidden>カスタム</span>
+          </div>
+        </div>
+
         <div class="opt-grid">
           <fieldset class="opt-group">
             <legend>容量を削る</legend>
@@ -136,15 +148,10 @@
           </fieldset>
         </div>
 
-        <label class="opt opt-warn">
-          <input type="checkbox" data-opt="clickToStage">
-          <span>スプライトのクリックをステージのクリックに書き換える</span>
-          <span class="tag">動作が変わります</span>
-        </label>
-
         <p class="options-note">
-          最後の項目以外は、動作を保つためのオプションです。似たコードの統合では、
-          リテラル入力だけを引数にし、ドロップダウンの項目は決して引数にしません。
+          プリセットは下のオプションをまとめて設定します。個別に変更すると「カスタム」になります。
+          コメントの削除ではコメントの内容だけが失われ、配置の再構成ではブロックの位置だけが変わります。
+          どちらもプロジェクトの動作は変わりません。
         </p>
       </section>
 

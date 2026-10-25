@@ -24,7 +24,6 @@
         broadcasts_renamed: "broadcasts renamed",
         fields_removed: "default fields removed",
         monitors_updated: "monitors updated",
-        click_rewrites: "click hats rewritten",
         vars_removed: "unused variables removed",
         lists_removed: "unused lists removed",
         procs_renamed: "custom blocks shortened",
@@ -88,6 +87,7 @@
       emptyFile: "That file is empty. Choose a Scratch project.",
       chooseFirst: "Choose a .sb3 or project.json file first.",
       optionsReset: "Options reset. Run again to apply them.",
+      presetApplied: "Preset applied: {name}. Run again to apply it.",
       downloaded: "Downloaded {name}.",
       downloadReady: "Ready to download {name}.",
       noStructuralChanges: "no structural changes counted",
@@ -123,7 +123,6 @@
         broadcasts_renamed: "ブロードキャスト名を短縮",
         fields_removed: "既定フィールドを削除",
         monitors_updated: "モニターを更新",
-        click_rewrites: "クリックの書き換え",
         vars_removed: "未使用の変数を削除",
         lists_removed: "未使用のリストを削除",
         procs_renamed: "カスタムブロック名を短縮",
@@ -187,6 +186,7 @@
       emptyFile: "ファイルが空です。Scratch プロジェクトを選んでください。",
       chooseFirst: "先に .sb3 または project.json を選んでください。",
       optionsReset: "設定を初期値に戻しました。再実行すると反映されます。",
+      presetApplied: "プリセット「{name}」を適用しました。再実行すると反映されます。",
       downloaded: "{name} をダウンロードしました。",
       downloadReady: "{name} をダウンロードできます。",
       noStructuralChanges: "構造の変更はありません",
@@ -220,7 +220,6 @@
   var DEFAULTS = {
     stripDefaults: true,
     shortenIds: true,
-    clickToStage: false,
     removeUnused: true,
     compressProcs: true,
     freqIds: true,
@@ -238,6 +237,36 @@
     stripComments: false,
     compactWorkspace: false
   };
+
+  // Presets are cumulative: each stage keeps everything the previous one had
+  // and adds its own options. The last stage therefore leaves every pass on.
+  var PRESETS = (function () {
+    var stages = [
+      ["clean", []],
+      ["safe", [
+        "stripDefaults", "shortenIds", "freqIds", "compressProcs",
+        "removeUnused", "dropObscuredShadows", "removeUnreachable",
+        "clearInitialValues"
+      ]],
+      ["cleanup", [
+        "removeNoops", "simplifyIfElse", "inlineSingleCall",
+        "foldConstants", "propagateConstants"
+      ]],
+      ["optimize", [
+        "extractDuplicates", "nearDuplicates", "loopDuplicates"
+      ]],
+      ["max", [
+        "stripComments", "compactWorkspace"
+      ]]
+    ];
+    var keys = [];
+    var out = [];
+    stages.forEach(function (stage) {
+      keys = keys.concat(stage[1]);
+      out.push({ id: stage[0], keys: keys });
+    });
+    return out;
+  })();
 
   var PHASE_LABELS = L.phases;
 
@@ -294,11 +323,16 @@
     cancelBtn: document.getElementById("cancelBtn"),
     stats: document.getElementById("stats"),
     statsKey: document.getElementById("statsKey"),
-    statsAll: document.getElementById("statsAll")
+    statsAll: document.getElementById("statsAll"),
+    presetCustom: document.getElementById("presetCustom")
   };
 
   var optionInputs = Array.prototype.slice.call(
     document.querySelectorAll("input[data-opt]")
+  );
+
+  var presetButtons = Array.prototype.slice.call(
+    document.querySelectorAll("button[data-preset]")
   );
 
   var worker = null;
@@ -376,6 +410,63 @@
     } catch (_) {
       /* storage can be unavailable in private modes */
     }
+  }
+
+  function presetValues(keys) {
+    var wanted = {};
+    keys.forEach(function (key) {
+      wanted[key] = true;
+    });
+    var out = {};
+    optionInputs.forEach(function (input) {
+      var key = input.getAttribute("data-opt");
+      out[key] = wanted[key] === true;
+    });
+    return out;
+  }
+
+  function sameOptions(a, b) {
+    return Object.keys(a).every(function (key) {
+      return (a[key] === true) === (b[key] === true);
+    });
+  }
+
+  // Returns the id of the preset the current checkboxes reproduce, or "" when
+  // the user has a mixed selection.
+  function activePreset() {
+    var current = readOptions();
+    for (var i = 0; i < PRESETS.length; i++) {
+      if (sameOptions(presetValues(PRESETS[i].keys), current)) {
+        return PRESETS[i].id;
+      }
+    }
+    return "";
+  }
+
+  function updatePresetUI() {
+    var active = activePreset();
+    presetButtons.forEach(function (button) {
+      button.setAttribute(
+        "aria-pressed",
+        String(button.getAttribute("data-preset") === active)
+      );
+    });
+    el.presetCustom.hidden = !!active;
+  }
+
+  function applyPreset(button) {
+    var id = button.getAttribute("data-preset");
+    var preset = null;
+    PRESETS.forEach(function (candidate) {
+      if (candidate.id === id) preset = candidate;
+    });
+    if (!preset) return;
+    applyOptions(presetValues(preset.keys));
+    updatePresetUI();
+    markStale();
+    setMessage(fmt(L.presetApplied, {
+      name: (button.textContent || "").trim()
+    }), false);
   }
 
   // ---------------------------------------------------------------- theme
@@ -890,8 +981,17 @@
     setMessage(fmt(L.downloaded, { name: result.name }), false);
   });
 
+  presetButtons.forEach(function (button) {
+    button.addEventListener("click", function () {
+      applyPreset(button);
+    });
+  });
+
   optionInputs.forEach(function (input) {
-    input.addEventListener("change", markStale);
+    input.addEventListener("change", function () {
+      markStale();
+      updatePresetUI();
+    });
   });
 
   themeInputs.forEach(function (button) {
@@ -902,6 +1002,7 @@
 
   el.resetOptions.addEventListener("click", function () {
     applyOptions(DEFAULTS);
+    updatePresetUI();
     saveOptions();
     markStale();
     setMessage(L.optionsReset, false);
@@ -958,6 +1059,7 @@
   }
 
   applyOptions(mergedOptions());
+  updatePresetUI();
   resetReadout();
   el.stats.hidden = true;
 })();

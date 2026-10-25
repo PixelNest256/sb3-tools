@@ -201,7 +201,6 @@
   const DEFAULT_OPTIONS = {
     stripDefaults: true,
     shortenIds: true,
-    clickToStage: false,
     removeUnused: true,
     compressProcs: true,
     freqIds: true,
@@ -239,7 +238,7 @@
       this.cancelled = typeof cancelled === "function" ? cancelled : () => false;
       this.stats = {
         blocks_renamed: 0, vars_renamed: 0, lists_renamed: 0, broadcasts_renamed: 0,
-        fields_removed: 0, monitors_updated: 0, click_rewrites: 0,
+        fields_removed: 0, monitors_updated: 0,
         vars_removed: 0, lists_removed: 0, procs_renamed: 0, args_renamed: 0,
         obscured_shadows_removed: 0, unreachable_blocks_removed: 0,
         unreachable_comments_removed: 0, broadcasts_removed: 0, procs_removed: 0,
@@ -3427,10 +3426,6 @@
       const st = this.stats;
       for (const blk of Object.values(blocks)) {
         if (!isDict(blk)) continue;
-        if (blk.opcode === "event_whenthisspriteclicked" && this.options.clickToStage) {
-          blk.opcode = "event_whenstageclicked";
-          st.click_rewrites += 1;
-        }
         if (blk.shadow === false) {
           delete blk.shadow;
           st.fields_removed += 1;
@@ -3552,11 +3547,6 @@
           processed.add(old);
 
           const senseObj = blk.opcode === "sensing_of" ? sensingObjectName(blk) : null;
-
-          if (o.clickToStage && blk.opcode === "event_whenthisspriteclicked") {
-            blk.opcode = "event_whenstageclicked";
-            st.click_rewrites += 1;
-          }
 
           if (isDict(blk.inputs)) {
             for (const [k, v] of Object.entries(blk.inputs)) {

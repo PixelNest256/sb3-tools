@@ -67,7 +67,6 @@
         broadcasts_renamed: "broadcasts renamed",
         fields_removed: "default fields removed",
         monitors_updated: "monitors updated",
-        click_rewrites: "click hats rewritten",
         vars_removed: "unused variables removed",
         lists_removed: "unused lists removed",
         procs_renamed: "custom blocks shortened",
@@ -166,7 +165,6 @@
         broadcasts_renamed: "ブロードキャスト名を短縮",
         fields_removed: "既定フィールドを削除",
         monitors_updated: "モニターを更新",
-        click_rewrites: "クリックの書き換え",
         vars_removed: "未使用の変数を削除",
         lists_removed: "未使用のリストを削除",
         procs_renamed: "カスタムブロック名を短縮",
@@ -224,7 +222,7 @@
     "stripDefaults", "shortenIds", "removeUnused", "clearInitialValues",
     "dropObscuredShadows", "removeUnreachable", "extractDuplicates", "nearDuplicates",
     "loopDuplicates", "inlineSingleCall", "removeNoops", "simplifyIfElse",
-    "compressProcs", "freqIds", "foldConstants", "propagateConstants", "clickToStage"
+    "compressProcs", "freqIds", "foldConstants", "propagateConstants"
   ];
   var PROJECT_KEY = "sb3-full-project-v1";
   var MEDIA_KEY = "sb3-full-media-v1";
@@ -341,7 +339,7 @@
   }
   function defaultProjectOptions() {
     var out = {};
-    PROJECT_KEYS.forEach(function (key) { out[key] = key !== "clickToStage"; });
+    PROJECT_KEYS.forEach(function (key) { out[key] = true; });
     return out;
   }
 

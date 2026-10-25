@@ -104,6 +104,18 @@
           <button type="button" id="resetOptions" class="text-btn">Reset to defaults</button>
         </div>
 
+        <div class="preset-bar">
+          <span class="preset-label" id="preset-label">Preset</span>
+          <div class="preset-list" role="group" aria-labelledby="preset-label">
+            <button type="button" class="preset-btn" data-preset="clean" aria-pressed="false" title="Only minify project.json. Every pass stays off.">JSON cleanup only</button>
+            <button type="button" class="preset-btn" data-preset="safe" aria-pressed="false" title="Internal IDs, unused stores, unreachable code, and hidden defaults. No restructuring.">No visible change</button>
+            <button type="button" class="preset-btn" data-preset="cleanup" aria-pressed="false" title="Also remove do-nothing blocks, simplify if-else, inline single-use definitions, and fold constants.">Code cleanup</button>
+            <button type="button" class="preset-btn" data-preset="optimize" aria-pressed="true" title="Also extract repeated code, merge similar code, and turn repeated runs into loops.">Code optimization</button>
+            <button type="button" class="preset-btn" data-preset="max" aria-pressed="false" title="Every option, including comment removal and re-flowing the workspace.">Maximum</button>
+            <span class="preset-custom" id="presetCustom" role="status" hidden>Custom</span>
+          </div>
+        </div>
+
         <div class="opt-grid">
           <fieldset class="opt-group">
             <legend>Reclaim space</legend>
@@ -136,16 +148,10 @@
           </fieldset>
         </div>
 
-        <label class="opt opt-warn">
-          <input type="checkbox" data-opt="clickToStage">
-          <span>Rewrite sprite clicks as stage clicks</span>
-          <span class="tag">changes behavior</span>
-        </label>
-
         <p class="options-note">
-          All options except the last one are designed to preserve behavior.
-          Near-duplicate sharing only passes literal inputs as arguments;
-          dropdown fields are never converted.
+          Presets set the options below; changing any option switches the preset
+          to Custom. Removing comments loses only their text, and re-flowing the
+          workspace only moves blocks — neither changes the project's behavior.
         </p>
       </section>
 

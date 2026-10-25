@@ -34,6 +34,10 @@ Each tool has an English page and a Japanese page (`…/ja/`). Use `docs/sb3/`,
 - **Fold** constant arithmetic and propagate stores that never change.
 - **Minify** the JSON and repack the zip.
 
+The `/sb3/` page groups these passes into presets — **JSON cleanup only**,
+**No visible change**, **Code cleanup**, **Code optimization**, and **Maximum** —
+and switches to **Custom** as soon as an individual option is changed.
+
 Every pass is kept only when the serialized JSON actually gets smaller, and the
 markers the Scratch VM relies on (an explicit `parent: null` and an
 end-of-stack `next: null`) are preserved.
