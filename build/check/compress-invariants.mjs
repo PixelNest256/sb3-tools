@@ -33,7 +33,9 @@ const SB3 = require(path.join(root, "docs", "sb3", "compressor.js"));
 
 const VID_COUNT = "varCount0000000001";
 const VID_TEXT = "varText00000000001";
+const VID_DEAD = "varNeverUsed0000001";
 const LID_LIST = "list00000000000001";
+const LID_DEAD = "listNeverUsed0000001";
 const ARG_ID = "argumentIdLong000001";
 
 let failures = 0;
@@ -56,9 +58,13 @@ function buildProject() {
       isStage: false, name: "Sprite1",
       variables: {
         [VID_COUNT]: ["count", 0],
-        [VID_TEXT]: ["text", "a fairly long default value"]
+        [VID_TEXT]: ["text", "a fairly long default value"],
+        [VID_DEAD]: ["neverUsed", "x"]
       },
-      lists: { [LID_LIST]: ["items", [1, 2, 3]] },
+      lists: {
+        [LID_LIST]: ["items", [1, 2, 3]],
+        [LID_DEAD]: ["deadList", [9]]
+      },
       broadcasts: {},
       blocks: {
         // Definition of "do %s": initialises both variables, then reads one.
@@ -105,12 +111,23 @@ function buildProject() {
           fields: { LIST: ["items", LID_LIST] }
         }),
         addItem: blk("data_addtolist", {
-          parent: "clearList", next: "sayItem",
+          parent: "clearList", next: "hideDead",
           inputs: { ITEM: [1, [10, "x"]] },
           fields: { LIST: ["items", LID_LIST] }
         }),
+        // "hide variable/list" for stores nothing else touches: removeUnused
+        // drops the stores, so these blocks must be spliced out rather than left
+        // pointing at something that no longer exists.
+        hideDead: blk("data_hidevariable", {
+          parent: "addItem", next: "hideDead2",
+          fields: { VARIABLE: ["neverUsed", VID_DEAD] }
+        }),
+        hideDead2: blk("data_hidelist", {
+          parent: "hideDead", next: "sayItem",
+          fields: { LIST: ["deadList", LID_DEAD] }
+        }),
         sayItem: blk("looks_say", {
-          parent: "addItem",
+          parent: "hideDead2",
           inputs: { MESSAGE: [3, "readItem", [10, ""]] }
         }),
         readItem: blk("data_itemoflist", {
@@ -211,6 +228,9 @@ const costume = t0.costumes[0];
 check(Number(costume.rotationCenterX.toFixed(4)) === costume.rotationCenterX, "rotation centre was not rounded");
 check(SB3.dumpsCompact(out.project).length > 0, "serialization failed");
 check(out.stats.monitors_removed === 1, "the hidden monitor was not removed");
+check(out.stats.dead_hide_blocks_removed === 2, "hide blocks for removed stores were not spliced out");
+check(!Object.keys(t0.blocks).some((b) => ["data_hidevariable", "data_hidelist"].includes(t0.blocks[b].opcode)),
+  "a hide block for a removed store is still present");
 
 if (failures) {
   console.error(`\n${failures} check(s) failed`);
@@ -223,6 +243,7 @@ console.log("  " + JSON.stringify({
   blocks_renamed: out.stats.blocks_renamed,
   arg_ids_shortened: out.stats.arg_ids_shortened,
   mutation_keys_added: out.stats.mutation_keys_added,
+  dead_hide_blocks_removed: out.stats.dead_hide_blocks_removed,
   vars_initialized: out.stats.vars_initialized,
   lists_initialized: out.stats.lists_initialized,
   monitors_removed: out.stats.monitors_removed

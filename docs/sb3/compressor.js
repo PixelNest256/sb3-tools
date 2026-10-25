@@ -252,6 +252,7 @@
         loops_created: 0, loop_blocks_saved: 0,
         const_vars_inlined: 0, const_reads_inlined: 0,
         arg_ids_shortened: 0, mutation_keys_added: 0, monitors_removed: 0,
+        dead_hide_blocks_removed: 0,
         comments_removed: 0, workspace_compacted: 0, float_values_rounded: 0
       };
       this.varMap = new Map();
@@ -1164,6 +1165,7 @@
 
       const blocks = tgt.blocks;
       let idMap = new Map();
+      if (isDict(blocks) && Object.keys(blocks).length) this._dropDeadHideBlocks(blocks);
       if (isDict(blocks) && Object.keys(blocks).length && o.extractDuplicates) {
         this._extractDuplicates(blocks);
       }
@@ -1315,6 +1317,28 @@
         delete inputs.SUBSTACK2;
         blk.opcode = "control_if";
         st.ifelse_converted += 1;
+      }
+    }
+
+    _dropDeadHideBlocks(blocks) {
+      // "hide variable/list" for a store that removeUnused deleted does nothing
+      // at run time, and keeping it would leave the output pointing at a store
+      // that no longer exists.  Splice those blocks out.
+      const dropped = new Set();
+      for (const id of this.droppedVarIds) dropped.add(id);
+      for (const id of this.droppedListIds) dropped.add(id);
+      if (!dropped.size) return;
+      const st = this.stats;
+      for (const bid of Object.keys(blocks)) {
+        const b = blocks[bid];
+        if (!isDict(b)) continue;
+        if (b.opcode !== "data_hidevariable" && b.opcode !== "data_hidelist") continue;
+        const key = b.opcode === "data_hidevariable" ? "VARIABLE" : "LIST";
+        const fv = (b.fields || {})[key];
+        const fid = isArr(fv) && fv.length > 1 ? fv[1] : null;
+        if (isStr(fid) && dropped.has(fid) && this._spliceOut(blocks, bid)) {
+          st.dead_hide_blocks_removed += 1;
+        }
       }
     }
 
