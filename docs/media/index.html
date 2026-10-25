@@ -56,9 +56,10 @@
         <h1 id="page-title">Smaller media.<br>Same project.</h1>
         <p class="lead">
           Costumes and sounds make most <code>.sb3</code> files heavy. This
-          reclaims space by re-encoding images, trimming SVG art, and
-          resampling audio — then repacks the file. Your scripts and
-          <code>project.json</code> are left untouched.
+          reclaims space by re-encoding images, trimming or rasterising SVG art, and
+          resampling audio — then repacks the file. Your scripts are left
+          untouched, and <code>project.json</code> only changes where a conversion
+          replaces an asset's file.
         </p>
         <dl class="spec">
           <div><dt>Reads</dt><dd>.sb3</dd></div>
@@ -125,6 +126,8 @@
           <div class="strength" id="autoExtra">
             <span class="strength-label">Extra</span>
             <label class="opt opt-inline"><input type="checkbox" id="optPngOptimize"><span>PNG lossless pass (slower, ~10% smaller)</span></label>
+            <label class="opt opt-inline"><input type="checkbox" id="optSvgToPng" checked><span>SVG → PNG when the PNG is smaller</span></label>
+            <label class="opt opt-inline"><input type="checkbox" id="optMinPx" checked><span>Raise sub-pixel art to 1px</span></label>
             <label class="opt opt-inline"><input type="checkbox" id="optWavMp3"><span>Convert WAV to MP3</span></label>
             <select id="wavMp3Bitrate" class="select select-inline" aria-label="WAV to MP3 bitrate">
               <option value="96" selected>96 kbps</option>
@@ -137,13 +140,13 @@
               <option value="96" selected>96 kbps</option>
               <option value="128">128 kbps</option>
             </select>
-            <p class="options-note auto-note">The PNG lossless pass (OxiPNG) shaves a little more off each PNG but is the slowest step; it is off by default.</p>
+            <p class="options-note auto-note">The PNG lossless pass (OxiPNG) shaves a little more off each PNG but is the slowest step; it is off by default. SVG → PNG rasterises a vector costume to a palette PNG when that is smaller; turn it off to keep vectors sharp at any zoom.</p>
           </div>
         </div>
 
         <div class="lossy-note">
           <span class="tag">Irreversible</span>
-          <p>Image and sound compression discards detail on purpose. Converting WAV to MP3 also rewrites <code>project.json</code>. Keep a copy of the original file — the change cannot be undone.</p>
+          <p>Image and sound compression discards detail on purpose. Converting WAV to MP3 or SVG to PNG also rewrites <code>project.json</code>. Keep a copy of the original file — the change cannot be undone.</p>
         </div>
 
         <div class="ledger" id="ledger" hidden>
@@ -171,17 +174,19 @@
             <ul>
               <li><strong>PNG costumes</strong> are reduced to a palette and written back as indexed PNGs, then squeezed losslessly by <strong>OxiPNG</strong>. A palette that keeps transparency or a dithered palette can be chosen.</li>
               <li><strong>JPEG costumes</strong> are re-encoded by <strong>MozJPEG</strong> at the quality you choose. Their pixel size is never changed, so rotation centres stay valid.</li>
-              <li><strong>SVG costumes</strong> are optimised by <strong>SVGO</strong> (comments, metadata, editor namespaces, path data, and excess digits).</li>
+              <li><strong>SVG costumes</strong> are optimised by <strong>SVGO</strong> (comments, metadata, editor namespaces, path data, and excess digits). A palette <strong>PNG</strong> at the same pixel size replaces the SVG when it is smaller; art under 1px is rendered at 1px so the PNG is never zero-sized.</li>
               <li><strong>WAV sounds</strong> are resampled with a band-limited filter, downmixed if you like, or converted to <strong>MP3</strong> with the LAME encoder.</li>
               <li><strong>MP3 sounds</strong> can have their ID3 tags stripped, or be re-decoded and re-encoded at a lower bitrate.</li>
               <li>An asset is only replaced when the new bytes are actually smaller. Anything else is kept as-is.</li>
             </ul>
             <p class="fine">
-              File names and formats stay the same — so <code>project.json</code>
-              stays byte-for-byte identical — unless a WAV sound is converted to
-              MP3, which updates that asset's <code>md5ext</code> and
-              <code>dataFormat</code>. The Scratch VM loads each costume and
-              sound by its name, so the project opens and runs the same.
+              File names and formats only change for a WAV→MP3 or SVG→PNG
+              conversion; those update that asset's <code>md5ext</code>,
+              <code>dataFormat</code>, and (for a rasterised costume)
+              <code>bitmapResolution</code> in <code>project.json</code>.
+              Everything else leaves <code>project.json</code> byte-for-byte
+              identical. The Scratch VM loads each costume and sound by its
+              name, so the project opens and runs the same.
             </p>
           </div>
         </details>

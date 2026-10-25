@@ -201,7 +201,9 @@
   const DEFAULT_OPTIONS = {
     stripDefaults: true,
     shortenIds: true,
+    renameStores: true,
     removeUnused: true,
+    keepMonitors: true,
     compressProcs: true,
     freqIds: true,
     dropObscuredShadows: true,
@@ -277,6 +279,8 @@
       this.writeListIds = new Set();
       this.showVarIds = new Set();
       this.showListIds = new Set();
+      this.keptMonVarIds = new Set();
+      this.keptMonListIds = new Set();
       this.visibleVarIds = new Set();
       this.visibleListIds = new Set();
       this.standaloneVarIds = new Set();
@@ -296,6 +300,7 @@
       }
       const o = this.options;
       this.progress("collect", 0.0, "Collecting variables, lists, and broadcasts...");
+      if (o.keepMonitors) this._collectMonitorStores(targets, project.monitors);
       if (o.dropObscuredShadows) this._dropObscuredShadows(targets);
       if (o.removeUnreachable) {
         this.progress("collect", 1.0, "Removing unreachable blocks and comments...");
@@ -310,6 +315,10 @@
         this.droppedVarIds = new Set();
         this.droppedListIds = new Set();
       } else {
+        if (o.keepMonitors) {
+          for (const id of this.keptMonVarIds) this.usedVarIds.add(id);
+          for (const id of this.keptMonListIds) this.usedListIds.add(id);
+        }
         this.droppedVarIds = new Set([...this.varMap.keys()].filter((k) => !this.usedVarIds.has(k)));
         this.droppedListIds = new Set([...this.listMap.keys()].filter((k) => !this.usedListIds.has(k)));
       }
@@ -342,9 +351,96 @@
     }
 
     // ------------------------------------------------------------------
+    // Stores a monitor points at, resolved by id first and then by name.
+    // `keepMonitors` leaves those stores (and the monitor entries) alone so a
+    // displayed variable keeps its label and a hidden monitor keeps its saved
+    // position.
+    _collectMonitorStores(targets, monitors) {
+      const varIds = new Set(), listIds = new Set();
+      this.keptMonVarIds = varIds;
+      this.keptMonListIds = listIds;
+      if (!isArr(monitors) || !monitors.length) return;
+      const scopes = { v: new Map(), l: new Map() };
+      let stageName = null;
+      const note = (kind, tname, name, id) => {
+        if (!isStr(tname) || !isStr(name)) return;
+        const table = scopes[kind];
+        if (!table.has(tname)) table.set(tname, new Map());
+        const byName = table.get(tname);
+        if (!byName.has(name)) byName.set(name, new Set());
+        byName.get(name).add(id);
+      };
+      for (const tgt of targets) {
+        if (!isDict(tgt)) continue;
+        if (tgt.isStage) stageName = tgt.name;
+        const varTable = isDict(tgt.variables) ? tgt.variables : {};
+        for (const [id, ent] of Object.entries(varTable)) {
+          note("v", tgt.name, isArr(ent) && ent.length ? ent[0] : String(ent), id);
+        }
+        const listTable = isDict(tgt.lists) ? tgt.lists : {};
+        for (const [id, ent] of Object.entries(listTable)) {
+          note("l", tgt.name, isArr(ent) && ent.length ? ent[0] : String(ent), id);
+        }
+      }
+      const allIds = (kind) => {
+        const out = new Set();
+        for (const byName of scopes[kind].values()) {
+          for (const ids of byName.values()) for (const id of ids) out.add(id);
+        }
+        return out;
+      };
+      const idsV = allIds("v"), idsL = allIds("l");
+      for (const mon of monitors) {
+        if (!isDict(mon)) continue;
+        const isVar = mon.opcode === "data_variable";
+        if (!isVar && mon.opcode !== "data_listcontents") continue;
+        const kind = isVar ? "v" : "l";
+        const out = isVar ? varIds : listIds;
+        const mid = mon.id;
+        const known = isVar ? idsV : idsL;
+        if (isStr(mid) && known.has(mid)) { out.add(mid); continue; }
+        const pname = (mon.params || {})[isVar ? "VARIABLE" : "LIST"];
+        if (!isStr(pname)) continue;
+        const owner = mon.spriteName !== null && mon.spriteName !== undefined
+          ? mon.spriteName : stageName;
+        const scope = scopes[kind].get(owner);
+        const scoped = scope ? scope.get(pname) : null;
+        if (scoped) {
+          for (const id of scoped) out.add(id);
+          continue;
+        }
+        for (const byName of scopes[kind].values()) {
+          const ids = byName.get(pname);
+          if (ids) for (const id of ids) out.add(id);
+        }
+      }
+    }
+
+    // ------------------------------------------------------------------
     _collect(targets) {
       let vi = 0, li = 0, bi = 0;
       const total = Math.max(targets.length, 1);
+      const keepV = this.keptMonVarIds, keepL = this.keptMonListIds;
+      // IDs and names are separate passes: shortenIds owns internal ids,
+      // renameStores owns the names people can see.
+      const renameStores = this.options.renameStores;
+      // Kept stores keep their original id and name, so reserve both: a
+      // generated store must never take either and make two stores collide.
+      const reservedV = new Set(), reservedL = new Set();
+      const reserve = (key, keep, reserved) => {
+        for (const tgt of targets) {
+          if (!isDict(tgt)) continue;
+          const table = isDict(tgt[key]) ? tgt[key] : {};
+          for (const [id, ent] of Object.entries(table)) {
+            if (!keep.has(id)) continue;
+            const name = isArr(ent) && ent.length ? ent[0] : String(ent);
+            reserved.add(id);
+            if (isStr(name)) reserved.add(name);
+          }
+        }
+      };
+      if (keepV.size) reserve("variables", keepV, reservedV);
+      if (keepL.size) reserve("lists", keepL, reservedL);
       for (let idx = 0; idx < targets.length; idx++) {
         const tgt = targets[idx];
         if (!isDict(tgt)) continue;
@@ -361,11 +457,20 @@
           const cloud = isStr(name) && name.startsWith(CLOUD_PREFIX);
           this.varOrigName.set(vid, name);
           if (cloud) this.varCloudIds.add(vid);
-          vi += 1;
-          const base = encodeId(vi);
-          const mapping = ["V" + base, (cloud ? CLOUD_PREFIX + " " : "") + "V" + base];
+          let mapping;
+          if (keepV.has(vid)) {
+            mapping = [vid, name];
+          } else {
+            let id, generated;
+            do {
+              vi += 1;
+              id = "V" + encodeId(vi);
+              generated = (cloud ? CLOUD_PREFIX + " " : "") + id;
+            } while (reservedV.has(id) || reservedV.has(generated));
+            mapping = [id, renameStores ? generated : name];
+          }
           this.varMap.set(vid, mapping);
-          if (!this.varByName.has(name)) this.varByName.set(name, mapping);
+          if (!this.varByName.has(name) || keepV.has(vid)) this.varByName.set(name, mapping);
           if (!this.varNameIds.has(name)) this.varNameIds.set(name, new Set());
           this.varNameIds.get(name).add(vid);
           if (scope && !scope.has(name)) scope.set(name, mapping);
@@ -374,11 +479,19 @@
         for (const [lid, ent] of Object.entries(lists)) {
           const name = isArr(ent) && ent.length ? ent[0] : String(ent);
           this.listOrigName.set(lid, name);
-          li += 1;
-          const base = encodeId(li);
-          const mapping = ["L" + base, "L" + base];
+          let mapping;
+          if (keepL.has(lid)) {
+            mapping = [lid, name];
+          } else {
+            let id;
+            do {
+              li += 1;
+              id = "L" + encodeId(li);
+            } while (reservedL.has(id));
+            mapping = [id, renameStores ? id : name];
+          }
           this.listMap.set(lid, mapping);
-          if (!this.listByName.has(name)) this.listByName.set(name, mapping);
+          if (!this.listByName.has(name) || keepL.has(lid)) this.listByName.set(name, mapping);
           if (!this.listNameIds.has(name)) this.listNameIds.set(name, new Set());
           this.listNameIds.get(name).add(lid);
         }
@@ -387,14 +500,21 @@
           const name = isArr(ent) && ent.length ? ent[0] : ent;
           bi += 1;
           const base = encodeId(bi);
-          const mapping = ["B" + base, "B" + base];
+          const mapping = ["B" + base, renameStores ? "B" + base : name];
           this.bcMap.set(bid, mapping);
           if (!this.bcByName.has(name)) this.bcByName.set(name, mapping);
         }
         this.progress("collect", (idx + 1) / total, "Collecting variables, lists, and broadcasts...");
       }
-      this.stats.vars_renamed = this.varMap.size;
-      this.stats.lists_renamed = this.listMap.size;
+      let renamedV = 0, renamedL = 0;
+      for (const [id, m] of this.varMap) {
+        if (m[0] !== id || m[1] !== this.varOrigName.get(id)) renamedV += 1;
+      }
+      for (const [id, m] of this.listMap) {
+        if (m[0] !== id || m[1] !== this.listOrigName.get(id)) renamedL += 1;
+      }
+      this.stats.vars_renamed = renamedV;
+      this.stats.lists_renamed = renamedL;
       this.stats.broadcasts_renamed = this.bcMap.size;
     }
 
@@ -3680,7 +3800,7 @@
             const ids = byname.get(pname);
             if (ids && ids.size && [...ids].every((id) => dropped.has(id))) continue;
           }
-          if (this.options.removeUnused && mon.visible === false) {
+          if (this.options.removeUnused && !this.options.keepMonitors && mon.visible === false) {
             const ids = new Set();
             if (isStr(mid)) ids.add(mid);
             const byName = (pname !== null && pname !== undefined) ? byname.get(pname) : null;
@@ -3701,13 +3821,17 @@
           let m = isStr(mid) ? table.get(mid) : null;
           if (!m) m = byname.get((mon.params || {})[pkey]);
           if (m) {
+            const before = mon.id;
+            const beforeName = (mon.params || {})[pkey];
             mon.id = m[0];
             const params = mon.params || (mon.params = {});
             if (pkey in params) params[pkey] = m[1];
-            st.monitors_updated += 1;
+            if (before !== m[0] || beforeName !== m[1]) st.monitors_updated += 1;
           }
         }
         if (this.options.stripDefaults) {
+          // Only the cached value and the default-valued fields go; `x`/`y`
+          // (the monitor's saved position) is never touched.
           delete mon.value;
           for (const [key, dflt] of MONITOR_DEFAULTS) {
             if (has(mon, key) && looseEq(mon[key], dflt)) {

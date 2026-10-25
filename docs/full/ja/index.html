@@ -120,10 +120,12 @@
           <fieldset class="opt-group">
             <legend>名前と定数</legend>
             <label class="opt"><input type="checkbox" checked data-popt="shortenIds"><span>内部 ID を短縮</span></label>
+            <label class="opt" title="内部 ID の短縮がオンのときだけ、名前も変わります。"><input type="checkbox" checked data-popt="renameStores"><span>変数・リスト・メッセージ名も短縮</span></label>
             <label class="opt"><input type="checkbox" checked data-popt="freqIds"><span>頻出ブロックを短い ID に</span></label>
             <label class="opt"><input type="checkbox" checked data-popt="compressProcs"><span>カスタムブロック名を短縮</span></label>
             <label class="opt"><input type="checkbox" checked data-popt="foldConstants"><span>定数計算を畳み込む</span></label>
             <label class="opt"><input type="checkbox" checked data-popt="propagateConstants"><span>定数変数を値に置換</span></label>
+            <label class="opt"><input type="checkbox" checked data-popt="keepMonitors"><span>モニターと位置を保持</span></label>
           </fieldset>
         </div>
 
@@ -142,6 +144,8 @@
           <div class="strength" id="autoExtra">
             <span class="strength-label">追加</span>
             <label class="opt opt-inline"><input type="checkbox" id="optPngOptimize"><span>PNG 無劣化圧縮（遅い・約10%小さく）</span></label>
+            <label class="opt opt-inline"><input type="checkbox" id="optSvgToPng" checked><span>PNG の方が軽ければ SVG から変換</span></label>
+            <label class="opt opt-inline"><input type="checkbox" id="optMinPx" checked><span>1px 未満の画像を 1px に</span></label>
             <label class="opt opt-inline"><input type="checkbox" id="optWavMp3"><span>WAV を MP3 に変換</span></label>
             <select id="wavMp3Bitrate" class="select select-inline" aria-label="WAV→MP3 ビットレート">
               <option value="96" selected>96 kbps</option>
@@ -154,13 +158,13 @@
               <option value="96" selected>96 kbps</option>
               <option value="128">128 kbps</option>
             </select>
-            <p class="options-note auto-note">PNG 無劣化圧縮（OxiPNG）は PNG をわずかに小さくしますが、最も遅い工程です。既定ではオフです。</p>
+            <p class="options-note auto-note">PNG 無劣化圧縮（OxiPNG）は PNG をわずかに小さくしますが、最も遅い工程です。既定ではオフです。SVG → PNG は、PNG の方が軽いときにベクター画像をパレット PNG に変換します（拡大しても鮮明なままにしたいときはオフにしてください）。</p>
           </div>
         </div>
 
         <div class="lossy-note">
           <span class="tag">元に戻せません</span>
-          <p>メディア圧縮は、あえて情報を捨てて容量を削ります。WAV を MP3 に変換すると <code>project.json</code> も書き換わります。元のファイルは必ず残してください。</p>
+          <p>メディア圧縮は、あえて情報を捨てて容量を削ります。WAV を MP3 に、SVG を PNG に変換すると <code>project.json</code> も書き換わります。元のファイルは必ず残してください。</p>
         </div>
 
         <div class="ledger" id="ledger" hidden>

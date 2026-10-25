@@ -587,6 +587,121 @@
   }
 
   // ------------------------------------------------------------------
+  // SVG rasterising
+  //
+  // Chromium cannot decode SVG through createImageBitmap, and workers have no
+  // <img>, so a host page injects a renderer that sends back RGBA pixels. When
+  // the engine runs on the page itself the local renderer below is used.
+
+  let svgRasterizer = null;
+  function setSvgRasterizer(fn) {
+    svgRasterizer = typeof fn === "function" ? fn : null;
+  }
+
+  const SVG_SIDE_LIMIT = 8192;
+  const SVG_PIXEL_LIMIT = 8388608;
+
+  function svgRasterSize(text, minPx) {
+    const dims = svgSize(text);
+    if (!dims) return null;
+    const round = (v) => {
+      const n = Math.round(v);
+      return minPx ? Math.max(1, n) : n;
+    };
+    const w = round(dims[0]);
+    const h = round(dims[1]);
+    if (!(w > 0) || !(h > 0)) return null;
+    if (w > SVG_SIDE_LIMIT || h > SVG_SIDE_LIMIT) return null;
+    if (w * h > SVG_PIXEL_LIMIT) return null;
+    return [w, h];
+  }
+
+  async function localSvgRender(data, width, height) {
+    if (typeof document === "undefined" || typeof Image === "undefined") return null;
+    const url = URL.createObjectURL(new Blob([data], { type: MIME.svg }));
+    try {
+      const img = await new Promise((resolve, reject) => {
+        const image = new Image();
+        image.onload = () => resolve(image);
+        image.onerror = () => reject(new Error("SVG decode failed"));
+        image.src = url;
+      });
+      const canvas = makeCanvas(width, height);
+      const ctx = canvas.getContext("2d", { willReadFrequently: true });
+      ctx.clearRect(0, 0, width, height);
+      ctx.drawImage(img, 0, 0, width, height);
+      const pixels = ctx.getImageData(0, 0, width, height);
+      return { data: new Uint8Array(pixels.data.buffer), width, height };
+    } finally {
+      URL.revokeObjectURL(url);
+    }
+  }
+
+  function hasVisiblePixel(rgba) {
+    for (let i = 3; i < rgba.length; i += 4) if (rgba[i] !== 0) return true;
+    return false;
+  }
+
+  // Chromium gives an SVG whose root width or height is under 1px a natural
+  // size of 0 and then draws nothing. Rewrite the root to the clamped pixel
+  // box we are about to draw into; drawImage stretches to that box anyway, so
+  // only the intrinsic size changes. The stripped SVG is never stored.
+  function svgForRaster(data, width, height) {
+    let text;
+    try {
+      text = new TextDecoder("utf-8").decode(data);
+    } catch (_) {
+      return data;
+    }
+    const m = /<svg\b[^>]*>/i.exec(text);
+    if (!m) return data;
+    const tag = m[0];
+    const num = (re) => {
+      const a = re.exec(tag);
+      if (!a) return NaN;
+      const v = parseFloat(a[1]);
+      return Number.isFinite(v) ? v : NaN;
+    };
+    const w = num(/\bwidth\s*=\s*["']([^"']+)["']/i);
+    const h = num(/\bheight\s*=\s*["']([^"']+)["']/i);
+    if (!(w < 1 || h < 1)) return data;
+    const root = tag
+      .replace(/\s(?:width|height)\s*=\s*("[^"]*"|'[^']*')/gi, "")
+      .replace(/^<svg\b/i, `<svg width="${width}" height="${height}"`);
+    return new TextEncoder().encode(text.slice(0, m.index) + root + text.slice(m.index + tag.length));
+  }
+
+  async function rasterizeSvg(data, width, height) {
+    const render = svgRasterizer || localSvgRender;
+    let out = null;
+    try {
+      out = await render(svgForRaster(data, width, height), width, height);
+    } catch (_) {
+      return null;
+    }
+    if (!out || !out.data || out.data.length < 4 || !out.width || !out.height) return null;
+    // A failed or unsupported drawing comes back blank; converting that would
+    // erase the costume, so keep the SVG instead.
+    if (!hasVisiblePixel(out.data)) return null;
+    return out;
+  }
+
+  async function rasterToPng(svgBytes, width, height, params) {
+    const raster = await rasterizeSvg(svgBytes, width, height);
+    if (!raster) return null;
+    let png = null;
+    try {
+      png = await encodeIndexedPng(raster.data, raster.width, raster.height,
+        params.pngColors || 128, params.pngDither);
+    } catch (_) {
+      png = null;
+    }
+    if (!png) return null;
+    if (params.pngOxilevel !== 0) png = await oxipngOptimise(png, params.pngOxilevel || 1);
+    return png;
+  }
+
+  // ------------------------------------------------------------------
   // image compression
 
   async function oxipngOptimise(bytes, level) {
@@ -706,8 +821,23 @@
       out = null;
     }
     if (!out || !/<svg[\s>]/i.test(out)) out = optimizeSvgRegex(src, level);
-    const bytes = new TextEncoder().encode(out);
-    if (bytes.length >= data.length) return null;
+    let bytes = new TextEncoder().encode(out);
+    if (bytes.length >= data.length) bytes = null;
+    // A rasterised copy is used only when it beats the SVG it replaces.
+    if (params.toPng !== false) {
+      const dims = svgRasterSize(out, params.minPx !== false);
+      if (dims) {
+        const svgBytes = new TextEncoder().encode(out);
+        const png = await rasterToPng(svgBytes, dims[0], dims[1], params);
+        if (png && png.length < (bytes ? bytes.length : data.length)) {
+          return {
+            bytes: png, note: `SVG → PNG ${dims[0]}×${dims[1]}`,
+            newExt: "png", newFormat: "png"
+          };
+        }
+      }
+    }
+    if (!bytes) return null;
     return { bytes, note: `SVGO ${level}` };
   }
 
@@ -1014,12 +1144,35 @@
     }
     return null;
   }
+  function svgLength(value) {
+    if (value === null || value === undefined) return null;
+    const m = /^\s*(\d*\.?\d+(?:[eE][-+]?\d+)?)\s*(px|pt|pc|mm|cm|in|%)?\s*$/i.exec(String(value));
+    if (!m) return null;
+    const n = parseFloat(m[1]);
+    if (!isFinite(n) || n <= 0) return null;
+    const unit = (m[2] || "").toLowerCase();
+    if (unit === "%") return null;
+    if (unit === "pt") return n * (96 / 72);
+    if (unit === "pc") return n * 16;
+    if (unit === "mm") return n * (96 / 25.4);
+    if (unit === "cm") return n * (96 / 2.54);
+    if (unit === "in") return n * 96;
+    return n;
+  }
   function svgSize(text) {
-    const wm = /width\s*=\s*"([\d.]+)/i.exec(text);
-    const hm = /height\s*=\s*"([\d.]+)/i.exec(text);
-    if (wm && hm) return [Math.round(parseFloat(wm[1])), Math.round(parseFloat(hm[1]))];
-    const vm = /viewBox\s*=\s*"([-\d.]+)[ ,]+([-\d.]+)[ ,]+([\d.]+)[ ,]+([\d.]+)"/i.exec(text);
-    if (vm) return [Math.round(parseFloat(vm[3])), Math.round(parseFloat(vm[4]))];
+    const tag = /<svg\b[^>]*>/i.exec(text);
+    if (!tag) return null;
+    const attr = (name) => {
+      const m = new RegExp("\\b" + name + "\\s*=\\s*(?:\"([^\"]*)\"|'([^']*)')", "i").exec(tag[0]);
+      return m ? (m[1] !== undefined ? m[1] : m[2]) : null;
+    };
+    const w = svgLength(attr("width"));
+    const h = svgLength(attr("height"));
+    if (w && h) return [w, h];
+    const vb = String(attr("viewBox") || "").trim().split(/[\s,]+/).map(Number);
+    if (vb.length === 4 && isFinite(vb[2]) && isFinite(vb[3]) && vb[2] > 0 && vb[3] > 0) {
+      return [vb[2], vb[3]];
+    }
     return null;
   }
   function wavMeta(bytes) {
@@ -1037,7 +1190,7 @@
     if (ext === "jpg" || ext === "jpeg") { const s = jpegSize(bytes); return s ? { width: s[0], height: s[1] } : {}; }
     if (ext === "svg") {
       const s = svgSize(new TextDecoder("utf-8").decode(bytes));
-      return s ? { width: s[0], height: s[1] } : {};
+      return s ? { width: Math.round(s[0]), height: Math.round(s[1]) } : {};
     }
     if (ext === "wav") return wavMeta(bytes) || {};
     return {};
@@ -1145,11 +1298,23 @@
         if (!Array.isArray(tgt[key])) continue;
         for (const a of tgt[key]) {
           if (!isDict(a)) continue;
-          const info = (a.md5ext && renames.get(a.md5ext)) || (a.assetId && renames.get(a.assetId));
+          // `md5ext` is the usual key; fall back to assetId.dataFormat so a
+          // project that omits it still gets its references rewritten.
+          const full = typeof a.md5ext === "string" && a.md5ext
+            ? a.md5ext
+            : (typeof a.assetId === "string" && a.assetId && typeof a.dataFormat === "string" && a.dataFormat
+              ? a.assetId + "." + a.dataFormat
+              : null);
+          const info = full && renames.get(full);
           if (!info) continue;
+          const wasSvg = a.dataFormat === "svg" ||
+            (typeof a.md5ext === "string" && a.md5ext.toLowerCase().endsWith(".svg"));
           a.md5ext = info.newName;
           a.assetId = info.newId;
           a.dataFormat = info.newFormat;
+          // scratch-vm doubles a bitmap only when it sees bitmapResolution 1,
+          // so a rasterised SVG must carry it or it would draw at half size.
+          if (wasSvg && info.newFormat === "png") a.bitmapResolution = 1;
           if (key === "sounds" && info.audio) {
             if ("rate" in a) a.rate = info.audio.rate;
             if ("sampleCount" in a) a.sampleCount = info.audio.sampleCount;
@@ -1192,7 +1357,15 @@
       if (asset.ext === "jpg" || asset.ext === "jpeg") return { method: "jpeg", ...preset.jpeg };
       return { method: "keep" };
     }
-    if (asset.kind === "vector") return { method: "svg", level: preset.svg };
+    if (asset.kind === "vector") {
+      return {
+        method: "svg", level: preset.svg,
+        toPng: o.svgToPng !== false,
+        minPx: o.minPx !== false,
+        pngColors: preset.png.colors,
+        pngOxilevel: o.pngOptimize === false ? 0 : preset.png.oxilevel
+      };
+    }
     if (asset.kind === "wav") {
       if (o.wavToMp3) return { method: "wav2mp3", bitrate: o.wavMp3Bitrate || 96, mono: preset.wav.mono };
       return { method: "wav", ...preset.wav };
@@ -1413,6 +1586,7 @@
 
   return {
     setJSZip,
+    setSvgRasterizer,
     scanBuffer,
     scanEntries,
     compressBuffer,

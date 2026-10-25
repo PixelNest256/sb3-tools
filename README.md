@@ -12,7 +12,7 @@ upload, no install, and no build step for the site itself.
 | Path | Tool | What it does |
 | --- | --- | --- |
 | `/sb3/` | **SB3 Compressor** | Shrinks `project.json` without changing behavior. Costumes and sounds are copied through untouched. |
-| `/media/` | **Media Compressor** | Re-encodes the costumes and sounds (PNG, JPEG, SVG, WAV, MP3). `project.json` is left byte-for-byte identical. |
+| `/media/` | **Media Compressor** | Re-encodes the costumes and sounds (PNG, JPEG, SVG, WAV, MP3). `project.json` only changes where a WAV→MP3 or SVG→PNG conversion rewrites that asset's entry. |
 | `/full/` | **Full Compressor** | Runs both passes on one file and repacks once. |
 | `/analyzer/` | **Analyzer** | Reports where the bytes and blocks go, with warnings against Scratch's upload limits. Writes nothing. |
 
@@ -23,8 +23,12 @@ Each tool has an English page and a Japanese page (`…/ja/`). Use `docs/sb3/`,
 
 ### Project pass — `project.json` (behavior-preserving)
 
-- **Rename** block IDs, variable/list names, broadcast names, and custom-block
-  proccodes/arguments to short generated IDs.
+- **Rename** block IDs to short generated IDs. Variable, list, and message
+  names, plus custom-block proccodes and arguments, are only shortened when the
+  matching option is on — with just IDs shortened, every name stays as it was.
+- **Keep** monitors when the "keep monitors" option is on (the default): the
+  variable or list a monitor shows is neither dropped nor renamed, and the
+  monitor keeps its position, so the stage looks the same.
 - **Drop** default-valued fields the VM restores, hidden input defaults, unused
   variables and lists, unreachable blocks/comments, uncalled definitions, and
   dead broadcasts.
@@ -48,14 +52,18 @@ end-of-stack `next: null`) are preserved.
 | --- | --- |
 | PNG | Palette quantisation (2–256 colours, optional dithering) written as an indexed PNG, then a lossless **OxiPNG** pass. Transparency is preserved. |
 | JPEG | **MozJPEG** re-encode at a chosen quality. Pixel dimensions never change, so rotation centres stay valid. |
-| SVG | **SVGO** optimisation. |
+| SVG | **SVGO** optimisation, and optionally a palette **PNG** at the same pixel size when the PNG is smaller. Art whose width or height is under 1px is rasterised at 1px, so the PNG is never zero-sized. |
 | WAV | Band-limited resampling, optional mono downmix, or transcoding to **MP3**. |
 | MP3 | ID3 tag stripping, or re-encode at a lower bitrate (mpg123 → LAME). |
 
-An asset is replaced only when the new bytes are actually smaller. File names
-and formats never change — so `project.json` stays what it was — **unless** a
-WAV sound is converted to MP3, in which case that asset's `md5ext` and
-`dataFormat` are updated.
+An asset is replaced only when the new bytes are actually smaller. A WAV→MP3
+conversion and an SVG→PNG conversion rewrite that asset's `assetId`, `md5ext`,
+and `dataFormat` in `project.json`. A rasterised costume keeps its rotation
+centre and gains `bitmapResolution: 1`, so Scratch draws it at the same size. If
+an SVG cannot be drawn (the raster comes back blank), it is kept as SVG.
+
+SVG rasterising is done by the page, because workers cannot decode SVG: the
+worker asks the tab for RGBA pixels and builds the palette PNG itself.
 
 Media compression is spread across a pool of nested Web Workers (one per CPU
 core, up to 12), so projects with many costumes finish several times faster; it
@@ -146,7 +154,9 @@ GitHub Pages is set to **Deploy from a branch → `main` / `docs`**. Push to
 
 - **Media compression is lossy and irreversible.** Always keep a copy of the
   original `.sb3`. The project pass is one-way too: original IDs and names are
-  not recoverable from the output.
+  not recoverable from the output. SVG→PNG is on by default and reduces a vector
+  costume to a palette PNG at its current pixel size — turn it off to keep
+  vector art crisp at any zoom.
 - Scratch's upload limits are 5 MB for `project.json` and 10 MB per asset; the
   analyzer flags anything over those. There is no limit on the number of assets.
 - The PNG lossless pass (OxiPNG) is the slowest step and is off by default; the

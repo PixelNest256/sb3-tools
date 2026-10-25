@@ -108,8 +108,8 @@
           <span class="preset-label" id="preset-label">プリセット</span>
           <div class="preset-list" role="group" aria-labelledby="preset-label">
             <button type="button" class="preset-btn" data-preset="clean" aria-pressed="false" title="project.json を小さくするだけ。すべての変換をオフにします。">JSON クリーンアップのみ</button>
-            <button type="button" class="preset-btn" data-preset="safe" aria-pressed="false" title="内部 ID、未使用の変数、到達しないコード、隠れた既定値を削除。構造は変えません。">見た目変化なし</button>
-            <button type="button" class="preset-btn" data-preset="cleanup" aria-pressed="false" title="何もしないブロックの削除、if-else の簡略化、1回だけの定義の展開、定数の畳み込みも行います。">コードクリーンアップ</button>
+            <button type="button" class="preset-btn" data-preset="safe" aria-pressed="false" title="内部 ID、未使用の変数、到達しないコード、隠れた既定値を削除。名前は変えません。">見た目変化なし</button>
+            <button type="button" class="preset-btn" data-preset="cleanup" aria-pressed="false" title="名前の短縮、何もしないブロックの削除、if-else の簡略化、1回だけの定義の展開、定数の畳み込みも行います。">コードクリーンアップ</button>
             <button type="button" class="preset-btn" data-preset="optimize" aria-pressed="true" title="繰り返すコードの抽出、似たコードの統合、繰り返しのループ化も行います。">コード最適化</button>
             <button type="button" class="preset-btn" data-preset="max" aria-pressed="false" title="コメントの削除とブロック配置の再構成を含む、すべてのオプション。">最大</button>
             <span class="preset-custom" id="presetCustom" role="status" hidden>カスタム</span>
@@ -141,18 +141,15 @@
           <fieldset class="opt-group">
             <legend>名前と定数</legend>
             <label class="opt"><input type="checkbox" checked data-opt="shortenIds"><span>内部 ID を短縮</span></label>
+            <label class="opt" title="内部 ID の短縮がオンのときだけ、名前も変わります。"><input type="checkbox" checked data-opt="renameStores"><span>変数・リスト・メッセージ名も短縮</span></label>
             <label class="opt"><input type="checkbox" checked data-opt="freqIds"><span>頻出ブロックを短い ID に</span></label>
             <label class="opt"><input type="checkbox" checked data-opt="compressProcs"><span>カスタムブロック名を短縮</span></label>
             <label class="opt"><input type="checkbox" checked data-opt="foldConstants"><span>定数計算を畳み込む</span></label>
             <label class="opt"><input type="checkbox" checked data-opt="propagateConstants"><span>定数変数を値に置換</span></label>
+            <label class="opt"><input type="checkbox" checked data-opt="keepMonitors"><span>モニターと位置を保持</span></label>
           </fieldset>
         </div>
 
-        <p class="options-note">
-          プリセットは下のオプションをまとめて設定します。個別に変更すると「カスタム」になります。
-          コメントの削除ではコメントの内容だけが失われ、配置の再構成ではブロックの位置だけが変わります。
-          どちらもプロジェクトの動作は変わりません。
-        </p>
       </section>
 
       <section class="notes" aria-labelledby="notes-title">
@@ -168,7 +165,8 @@
               音はそのままコピーされます。
             </p>
             <ul>
-              <li>ブロック ID、変数名、リスト名、ブロードキャスト名は、短い生成 ID になります。</li>
+              <li>ブロック ID は短い生成 ID になります。変数名・リスト名・ブロードキャスト名やカスタムブロック名の短縮は別オプションで、オフにすれば名前はそのまま残ります。</li>
+              <li>モニターは既定で保持されます。表示している変数・リストは削除も改名もされないので、ステージの見た目は変わりません。</li>
               <li>未使用の変数、到達しないスクリプト、既定値のフィールドは削除されます。</li>
               <li>繰り返しや似たコードは、ファイルが小さくなる場合に限り、新しいカスタムブロックになります。</li>
               <li>元の名前は出力から復元できません。元のファイルは必ず残しておいてください。</li>

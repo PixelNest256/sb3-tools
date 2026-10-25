@@ -12,6 +12,22 @@ importScripts("jszip.min.js", "media.js", "project.js", "engine.js");
 if (typeof MEDIA !== "undefined" && typeof JSZip !== "undefined") MEDIA.setJSZip(JSZip);
 if (typeof SB3 !== "undefined" && typeof JSZip !== "undefined") SB3.setJSZip(JSZip);
 
+// ------------------------------------------------------------------
+// SVG rasterising is done by the page: workers cannot decode SVG.
+
+let svgRequestSeq = 0;
+const svgRequests = new Map();
+
+if (typeof MEDIA !== "undefined" && typeof MEDIA.setSvgRasterizer === "function") {
+  MEDIA.setSvgRasterizer((bytes, width, height) => new Promise((resolve) => {
+    const id = ++svgRequestSeq;
+    svgRequests.set(id, resolve);
+    let copy;
+    try { copy = bytes.slice(); } catch (_) { copy = bytes; }
+    self.postMessage({ type: "svgRender", id, width, height, bytes: copy }, [copy.buffer]);
+  }));
+}
+
 let lastPercent = 0;
 
 function report(phase, frac, message) {
@@ -115,6 +131,11 @@ function getRunner() {
   }
   return async function runAsset(bytes, setting) {
     try {
+      // SVG rasterising needs the page's <img>; keep those jobs here so the
+      // request can travel through this worker.
+      if (setting && setting.method === "svg" && setting.toPng !== false) {
+        return await MEDIA.compressAssetBytes(bytes, setting);
+      }
       return await pool.run(bytes, setting);
     } catch (_) {
       return await MEDIA.compressAssetBytes(bytes, setting);
@@ -127,6 +148,17 @@ function getRunner() {
 self.onmessage = async (event) => {
   const data = event.data || {};
   try {
+    if (data.type === "svgRendered") {
+      const resolve = svgRequests.get(data.id);
+      svgRequests.delete(data.id);
+      if (resolve) {
+        resolve(data.width && data.height && data.pixels
+          ? { data: new Uint8Array(data.pixels), width: data.width, height: data.height }
+          : null);
+      }
+      return;
+    }
+
     if (data.type === "asset") {
       const res = await MEDIA.compressAssetBytes(data.bytes, data.setting);
       const msg = {

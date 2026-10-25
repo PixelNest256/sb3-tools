@@ -84,9 +84,10 @@
         </div>
         <p class="card-sub">Costumes &amp; sounds · lossy</p>
         <p class="body">
-          Reduces PNG costumes to a palette, re-encodes JPEGs, trims SVG art,
-          resamples WAV sounds, and strips MP3 tags. <code>project.json</code>
-          stays byte-for-byte identical.
+          Reduces PNG costumes to a palette, re-encodes JPEGs, trims or
+          rasterises SVG art, resamples WAV sounds, and strips MP3 tags. A
+          format only changes when the conversion is smaller, and then just
+          that asset's entry in <code>project.json</code> changes.
         </p>
         <dl class="spec">
           <div><dt>Reads</dt><dd>.sb3</dd></div>

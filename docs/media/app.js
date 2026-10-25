@@ -172,6 +172,8 @@
     strengthWrap: document.getElementById("strengthWrap"),
     autoExtra: document.getElementById("autoExtra"),
     optPngOptimize: document.getElementById("optPngOptimize"),
+    optSvgToPng: document.getElementById("optSvgToPng"),
+    optMinPx: document.getElementById("optMinPx"),
     optWavMp3: document.getElementById("optWavMp3"),
     wavMp3Bitrate: document.getElementById("wavMp3Bitrate"),
     optMp3Reenc: document.getElementById("optMp3Reenc"),
@@ -266,11 +268,16 @@
   }
 
   function readAudio() {
-    var out = { pngOptimize: false, wavToMp3: false, wavMp3Bitrate: 96, reencodeMp3: false, mp3Bitrate: 96 };
+    var out = {
+      pngOptimize: false, svgToPng: true, minPx: true,
+      wavToMp3: false, wavMp3Bitrate: 96, reencodeMp3: false, mp3Bitrate: 96
+    };
     try {
       var s = JSON.parse(localStorage.getItem(AUDIO_KEY) || "null");
       if (s && typeof s === "object") {
         out.pngOptimize = s.pngOptimize === true;
+        out.svgToPng = s.svgToPng !== false;
+        out.minPx = s.minPx !== false;
         out.wavToMp3 = !!s.wavToMp3;
         out.reencodeMp3 = !!s.reencodeMp3;
         if ([64, 96, 128].indexOf(Number(s.wavMp3Bitrate)) >= 0) out.wavMp3Bitrate = Number(s.wavMp3Bitrate);
@@ -282,6 +289,8 @@
 
   function applyAudio(a) {
     if (el.optPngOptimize) el.optPngOptimize.checked = a.pngOptimize === true;
+    if (el.optSvgToPng) el.optSvgToPng.checked = a.svgToPng !== false;
+    if (el.optMinPx) el.optMinPx.checked = a.minPx !== false;
     if (el.optWavMp3) el.optWavMp3.checked = !!a.wavToMp3;
     if (el.optMp3Reenc) el.optMp3Reenc.checked = !!a.reencodeMp3;
     if (el.wavMp3Bitrate) el.wavMp3Bitrate.value = String(a.wavMp3Bitrate);
@@ -291,6 +300,8 @@
   function saveAudio() {
     var a = {
       pngOptimize: !!(el.optPngOptimize && el.optPngOptimize.checked),
+      svgToPng: !(el.optSvgToPng && !el.optSvgToPng.checked),
+      minPx: !(el.optMinPx && !el.optMinPx.checked),
       wavToMp3: !!(el.optWavMp3 && el.optWavMp3.checked),
       reencodeMp3: !!(el.optMp3Reenc && el.optMp3Reenc.checked),
       wavMp3Bitrate: el.wavMp3Bitrate ? parseInt(el.wavMp3Bitrate.value, 10) : 96,
@@ -387,12 +398,28 @@
 
   function readPlan() {
     var plan = {};
+    var extras = vectorExtras();
     controlEls.forEach(function (control, name) {
       if (control.tagName === "SELECT") {
-        plan[name] = settingFromValue(null, control.value);
+        var setting = settingFromValue(null, control.value);
+        if (setting.method === "svg") {
+          setting = Object.assign({}, setting, extras);
+        }
+        plan[name] = setting;
       }
     });
     return plan;
+  }
+
+  function vectorExtras() {
+    var preset = PRESET_OPTION[strength] || PRESET_OPTION.balanced;
+    var colors = parseInt(String(preset.png).slice(4), 10);
+    return {
+      toPng: !(el.optSvgToPng && !el.optSvgToPng.checked),
+      minPx: !(el.optMinPx && !el.optMinPx.checked),
+      pngColors: colors || 128,
+      pngOxilevel: 1
+    };
   }
 
   function sizeText(asset) {
@@ -842,6 +869,49 @@
     if (worker) { worker.terminate(); worker = null; }
   }
 
+  // The engine asks the page to draw an SVG (workers cannot decode SVG) and
+  // gets the RGBA pixels back so it can build the palette PNG itself.
+  function renderSvgForWorker(id, bytes, width, height) {
+    renderSvgPixels(new Uint8Array(bytes), width, height).then(function (out) {
+      if (!worker) return;
+      if (!out) {
+        worker.postMessage({ type: "svgRendered", id: id, pixels: null });
+        return;
+      }
+      worker.postMessage({
+        type: "svgRendered", id: id, width: out.width, height: out.height, pixels: out.pixels
+      }, [out.pixels.buffer]);
+    }).catch(function () {
+      if (worker) worker.postMessage({ type: "svgRendered", id: id, pixels: null });
+    });
+  }
+
+  function renderSvgPixels(bytes, width, height) {
+    return new Promise(function (resolve) {
+      var url = URL.createObjectURL(new Blob([bytes], { type: "image/svg+xml" }));
+      var img = new Image();
+      img.onload = function () {
+        var out = null;
+        try {
+          var canvas = document.createElement("canvas");
+          canvas.width = width;
+          canvas.height = height;
+          var ctx = canvas.getContext("2d", { willReadFrequently: true });
+          ctx.clearRect(0, 0, width, height);
+          ctx.drawImage(img, 0, 0, width, height);
+          var data = ctx.getImageData(0, 0, width, height).data;
+          out = { pixels: new Uint8Array(data.buffer), width: width, height: height };
+        } catch (_) {
+          out = null;
+        }
+        URL.revokeObjectURL(url);
+        resolve(out);
+      };
+      img.onerror = function () { URL.revokeObjectURL(url); resolve(null); };
+      img.src = url;
+    });
+  }
+
   function progressReporter(myRun) {
     return function (phase, frac, message) {
       if (myRun !== runId) return;
@@ -904,6 +974,10 @@
   function onWorkerMessage(event) {
     var data = event.data || {};
     if (data.type === "pool") { poolSize = data.size || 0; return; }
+    if (data.type === "svgRender") {
+      renderSvgForWorker(data.id, data.bytes, data.width, data.height);
+      return;
+    }
     if (data.type === "progress") {
       if (!running) return;
       setProgress(data.percent || 0);
@@ -969,6 +1043,8 @@
     var options = { mode: mode, strength: strength };
     if (mode === "auto") {
       options.pngOptimize = !(el.optPngOptimize && !el.optPngOptimize.checked);
+      options.svgToPng = !(el.optSvgToPng && !el.optSvgToPng.checked);
+      options.minPx = !(el.optMinPx && !el.optMinPx.checked);
       options.wavToMp3 = !!(el.optWavMp3 && el.optWavMp3.checked);
       options.reencodeMp3 = !!(el.optMp3Reenc && el.optMp3Reenc.checked);
       options.wavMp3Bitrate = el.wavMp3Bitrate ? parseInt(el.wavMp3Bitrate.value, 10) : 96;
@@ -1206,7 +1282,7 @@
     });
   });
 
-  [el.optPngOptimize, el.optWavMp3, el.wavMp3Bitrate, el.optMp3Reenc, el.mp3Bitrate].forEach(function (control) {
+  [el.optPngOptimize, el.optSvgToPng, el.optMinPx, el.optWavMp3, el.wavMp3Bitrate, el.optMp3Reenc, el.mp3Bitrate].forEach(function (control) {
     if (control) control.addEventListener("change", onAudioChange);
   });
 
@@ -1224,7 +1300,10 @@
     strengthButtons.forEach(function (b) {
       b.setAttribute("aria-pressed", String(b.getAttribute("data-strength") === strength));
     });
-    applyAudio({ pngOptimize: false, wavToMp3: false, reencodeMp3: false, wavMp3Bitrate: 96, mp3Bitrate: 96 });
+    applyAudio({
+      pngOptimize: false, svgToPng: true, minPx: true,
+      wavToMp3: false, reencodeMp3: false, wavMp3Bitrate: 96, mp3Bitrate: 96
+    });
     saveAudio();
     applyModeUI();
     if (scan) renderLedger();

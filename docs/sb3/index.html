@@ -108,8 +108,8 @@
           <span class="preset-label" id="preset-label">Preset</span>
           <div class="preset-list" role="group" aria-labelledby="preset-label">
             <button type="button" class="preset-btn" data-preset="clean" aria-pressed="false" title="Only minify project.json. Every pass stays off.">JSON cleanup only</button>
-            <button type="button" class="preset-btn" data-preset="safe" aria-pressed="false" title="Internal IDs, unused stores, unreachable code, and hidden defaults. No restructuring.">No visible change</button>
-            <button type="button" class="preset-btn" data-preset="cleanup" aria-pressed="false" title="Also remove do-nothing blocks, simplify if-else, inline single-use definitions, and fold constants.">Code cleanup</button>
+            <button type="button" class="preset-btn" data-preset="safe" aria-pressed="false" title="Internal IDs, unused stores, unreachable code, and hidden defaults. Names stay as they are.">No visible change</button>
+            <button type="button" class="preset-btn" data-preset="cleanup" aria-pressed="false" title="Also shorten names, remove do-nothing blocks, simplify if-else, inline single-use definitions, and fold constants.">Code cleanup</button>
             <button type="button" class="preset-btn" data-preset="optimize" aria-pressed="true" title="Also extract repeated code, merge similar code, and turn repeated runs into loops.">Code optimization</button>
             <button type="button" class="preset-btn" data-preset="max" aria-pressed="false" title="Every option, including comment removal and re-flowing the workspace.">Maximum</button>
             <span class="preset-custom" id="presetCustom" role="status" hidden>Custom</span>
@@ -141,18 +141,15 @@
           <fieldset class="opt-group">
             <legend>Rename &amp; fold</legend>
             <label class="opt"><input type="checkbox" checked data-opt="shortenIds"><span>Shorten internal IDs</span></label>
+            <label class="opt" title="Names change only while internal IDs are also shortened."><input type="checkbox" checked data-opt="renameStores"><span>Shorten variable, list, and message names</span></label>
             <label class="opt"><input type="checkbox" checked data-opt="freqIds"><span>Give frequent blocks shorter IDs</span></label>
             <label class="opt"><input type="checkbox" checked data-opt="compressProcs"><span>Shorten custom block names</span></label>
             <label class="opt"><input type="checkbox" checked data-opt="foldConstants"><span>Calculate constant math</span></label>
             <label class="opt"><input type="checkbox" checked data-opt="propagateConstants"><span>Replace constant variables with values</span></label>
+            <label class="opt"><input type="checkbox" checked data-opt="keepMonitors"><span>Keep monitors and their positions</span></label>
           </fieldset>
         </div>
 
-        <p class="options-note">
-          Presets set the options below; changing any option switches the preset
-          to Custom. Removing comments loses only their text, and re-flowing the
-          workspace only moves blocks — neither changes the project's behavior.
-        </p>
       </section>
 
       <section class="notes" aria-labelledby="notes-title">
@@ -168,7 +165,8 @@
               Costumes and sounds are copied through unchanged.
             </p>
             <ul>
-              <li>Block IDs, variable names, list names, and broadcast names become short generated IDs.</li>
+              <li>Block IDs become short generated IDs. Variable, list, and broadcast names and custom-block proccodes can be shortened too — with that off, every name stays as it was.</li>
+              <li>Monitors are kept by default: the stores they show are neither removed nor renamed, so the stage looks the same.</li>
               <li>Unused stores, unreachable scripts, and default-valued fields are removed.</li>
               <li>Repeated or near-repeated code becomes a new custom block when that makes the file smaller.</li>
               <li>Original names cannot be recovered from the output. Keep a copy of the original file.</li>

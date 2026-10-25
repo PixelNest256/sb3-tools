@@ -120,10 +120,12 @@
           <fieldset class="opt-group">
             <legend>Rename &amp; fold</legend>
             <label class="opt"><input type="checkbox" checked data-popt="shortenIds"><span>Shorten internal IDs</span></label>
+            <label class="opt" title="Names change only while internal IDs are also shortened."><input type="checkbox" checked data-popt="renameStores"><span>Shorten variable, list, and message names</span></label>
             <label class="opt"><input type="checkbox" checked data-popt="freqIds"><span>Give frequent blocks shorter IDs</span></label>
             <label class="opt"><input type="checkbox" checked data-popt="compressProcs"><span>Shorten custom block names</span></label>
             <label class="opt"><input type="checkbox" checked data-popt="foldConstants"><span>Calculate constant math</span></label>
             <label class="opt"><input type="checkbox" checked data-popt="propagateConstants"><span>Replace constant variables with values</span></label>
+            <label class="opt"><input type="checkbox" checked data-popt="keepMonitors"><span>Keep monitors and their positions</span></label>
           </fieldset>
         </div>
 
@@ -142,6 +144,8 @@
           <div class="strength" id="autoExtra">
             <span class="strength-label">Extra</span>
             <label class="opt opt-inline"><input type="checkbox" id="optPngOptimize"><span>PNG lossless pass (slower, ~10% smaller)</span></label>
+            <label class="opt opt-inline"><input type="checkbox" id="optSvgToPng" checked><span>SVG → PNG when the PNG is smaller</span></label>
+            <label class="opt opt-inline"><input type="checkbox" id="optMinPx" checked><span>Raise sub-pixel art to 1px</span></label>
             <label class="opt opt-inline"><input type="checkbox" id="optWavMp3"><span>Convert WAV to MP3</span></label>
             <select id="wavMp3Bitrate" class="select select-inline" aria-label="WAV to MP3 bitrate">
               <option value="96" selected>96 kbps</option>
@@ -154,13 +158,13 @@
               <option value="96" selected>96 kbps</option>
               <option value="128">128 kbps</option>
             </select>
-            <p class="options-note auto-note">The PNG lossless pass (OxiPNG) shaves a little more off each PNG but is the slowest step; it is off by default.</p>
+            <p class="options-note auto-note">The PNG lossless pass (OxiPNG) shaves a little more off each PNG but is the slowest step; it is off by default. SVG → PNG rasterises a vector costume to a palette PNG when that is smaller; turn it off to keep vectors sharp at any zoom.</p>
           </div>
         </div>
 
         <div class="lossy-note">
           <span class="tag">Irreversible</span>
-          <p>Media compression discards detail on purpose, and converting WAV to MP3 rewrites <code>project.json</code>. Keep a copy of the original file — the change cannot be undone.</p>
+          <p>Media compression discards detail on purpose, and converting WAV to MP3 or SVG to PNG rewrites <code>project.json</code>. Keep a copy of the original file — the change cannot be undone.</p>
         </div>
 
         <div class="ledger" id="ledger" hidden>

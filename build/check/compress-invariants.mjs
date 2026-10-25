@@ -19,7 +19,10 @@
  *      own custom block: shortening argument *ids* must not rewrite argument
  *      *names*, and merging near-duplicate code must carry a reporter from a
  *      nested substack chain over as a parameter instead of leaving it behind
- *      in the generated procedure.
+ *      in the generated procedure;
+ *   6. `shortenIds` and `renameStores` are independent: shortening ids can
+ *      leave every visible name (variables, lists, messages, custom blocks,
+ *      arguments) exactly as it was.
  *
  * Invariants 1-3 were broken by "remove legacy mutation keys"; 4 by clearing
  * every overwritten value; 5 by "shorten internal IDs" and by near-duplicate
@@ -222,7 +225,7 @@ function audit(project) {
   issues.forEach((i) => check(false, i));
 }
 
-const options = new SB3.Options({});
+const options = new SB3.Options({ keepMonitors: false });
 const out = SB3.compressProject(buildProject(), options, () => {});
 audit(out.project);
 
@@ -260,6 +263,96 @@ check(out.stats.monitors_removed === 1, "the hidden monitor was not removed");
 check(out.stats.dead_hide_blocks_removed === 2, "hide blocks for removed stores were not spliced out");
 check(!Object.keys(t0.blocks).some((b) => ["data_hidevariable", "data_hidelist"].includes(t0.blocks[b].opcode)),
   "a hide block for a removed store is still present");
+
+// keepMonitors (the default): a displayed variable keeps its name and a hidden
+// monitor keeps its saved position, so neither the store nor the monitor may be
+// renamed or dropped.
+const monProject = buildProject();
+monProject.monitors = [
+  { id: VID_COUNT, opcode: "data_variable", params: { VARIABLE: "count" }, spriteName: "Sprite1",
+    x: 12, y: 34, visible: true, mode: "default", width: 0, height: 0, sliderMin: 0, sliderMax: 100, isDiscrete: true },
+  { id: LID_DEAD, opcode: "data_listcontents", params: { LIST: "deadList" }, spriteName: "Sprite1",
+    x: 56, y: 78, visible: false, mode: "default", width: 0, height: 0, sliderMin: 0, sliderMax: 100, isDiscrete: true }
+];
+const kept = SB3.compressProject(monProject, new SB3.Options({}), () => {});
+const keptTarget = kept.project.targets[0];
+const keptMons = kept.project.monitors || [];
+check(kept.stats.monitors_removed === 0, "keepMonitors removed a monitor");
+check(keptMons.length === 2, `keepMonitors dropped a monitor (${keptMons.length} left)`);
+if (keptMons.length === 2) {
+  check(keptMons[0].id === VID_COUNT && keptMons[0].params.VARIABLE === "count",
+    "keepMonitors renamed the displayed variable");
+  check(keptMons[0].x === 12 && keptMons[0].y === 34, "keepMonitors dropped the displayed monitor position");
+  check(keptMons[1].id === LID_DEAD && keptMons[1].params.LIST === "deadList",
+    "keepMonitors renamed the hidden monitor's list");
+  check(keptMons[1].x === 56 && keptMons[1].y === 78, "keepMonitors dropped the hidden monitor position");
+}
+check(keptTarget.variables && keptTarget.variables[VID_COUNT] && keptTarget.variables[VID_COUNT][0] === "count",
+  "keepMonitors renamed the displayed variable's store");
+check(keptTarget.lists && keptTarget.lists[LID_DEAD] && keptTarget.lists[LID_DEAD][0] === "deadList",
+  "keepMonitors removed or renamed the hidden monitor's list");
+// Renaming is off for kept stores, but every other store is still shortened.
+check(Object.keys(keptTarget.variables || {}).length === 2, "keepMonitors kept a variable it should not have");
+
+/*
+ * shortenIds owns ids; renameStores owns visible names. With the "no visible
+ * change" mix (ids on, names off) every variable, list, message, custom block,
+ * and argument name must survive untouched.
+ */
+const namedProject = buildProject();
+const namedTarget = namedProject.targets[0];
+const BID_GO = "broadcastLongId0001";
+namedTarget.broadcasts = { [BID_GO]: "go" };
+namedTarget.blocks.flag.next = "broadcastGo";
+namedTarget.blocks.broadcastGo = blk("event_broadcast", {
+  parent: "flag", next: "call",
+  inputs: { BROADCAST_INPUT: [1, [11, "go", BID_GO]] }
+});
+namedTarget.blocks.receiveGo = blk("event_whenbroadcastreceived", {
+  topLevel: true, x: 0, y: 0, next: "receiveSay",
+  fields: { BROADCAST_OPTION: ["go", BID_GO] }
+});
+namedTarget.blocks.receiveSay = blk("looks_say", {
+  parent: "receiveGo", next: null,
+  inputs: { MESSAGE: [1, [10, "go!"]] }
+});
+const noRename = SB3.compressProject(namedProject, new SB3.Options({
+  renameStores: false, compressProcs: false, removeUnused: false, keepMonitors: false
+}), () => {});
+const nt = noRename.project.targets[0];
+const namesOf = (table) => Object.values(table || {}).map((v) => (Array.isArray(v) ? v[0] : v));
+check(namesOf(nt.variables).includes("count") && namesOf(nt.variables).includes("text") &&
+  namesOf(nt.variables).includes("neverUsed"), "renameStores=false changed a variable name");
+check(!(VID_COUNT in (nt.variables || {})), "shortenIds did not shorten variable ids when names were kept");
+check(namesOf(nt.lists).includes("items") && namesOf(nt.lists).includes("deadList"),
+  "renameStores=false changed a list name");
+check(!(LID_LIST in (nt.lists || {})), "shortenIds did not shorten list ids when names were kept");
+check(namesOf(nt.broadcasts).includes("go"), "renameStores=false changed a message name");
+check(!(BID_GO in (nt.broadcasts || {})), "shortenIds did not shorten message ids when names were kept");
+
+let keptField = null;
+for (const b of Object.values(nt.blocks || {})) {
+  if (!b || Array.isArray(b) || b.opcode !== "data_setvariableto") continue;
+  if (b.fields && b.fields.VARIABLE && b.fields.VARIABLE[0] === "count") keptField = b;
+}
+check(!!keptField, "a block's VARIABLE name was rewritten with renameStores=false");
+if (keptField) {
+  check(keptField.fields.VARIABLE[1] !== VID_COUNT, "the block's variable id was not shortened");
+  check(keptField.fields.VARIABLE[1] in (nt.variables || {}), "the block points at a missing variable id");
+}
+const keptProto = Object.values(nt.blocks || {}).find((b) => b && !Array.isArray(b) && b.opcode === "procedures_prototype");
+check(keptProto && keptProto.mutation && keptProto.mutation.proccode === "do %s",
+  "compressProcs=false changed a custom block name");
+check(keptProto && parseArr(keptProto.mutation.argumentnames)[0] === "x",
+  "compressProcs=false changed an argument name");
+const keptCall = Object.values(nt.blocks || {}).find((b) => b && !Array.isArray(b) && b.opcode === "procedures_call");
+check(keptCall && keptCall.mutation && keptCall.mutation.proccode === "do %s",
+  "compressProcs=false left a call pointing at a renamed custom block");
+
+// The default mix still shortens both, so existing output is unchanged.
+const bothOut = SB3.compressProject(buildProject(), new SB3.Options({ keepMonitors: false }), () => {});
+check(namesOf(bothOut.project.targets[0].variables).every((n) => /^V/.test(String(n))),
+  "the default no longer shortens variable names");
 
 /*
  * Extra regressions, both of which reached users as "the project breaks or the

@@ -220,7 +220,9 @@
   var DEFAULTS = {
     stripDefaults: true,
     shortenIds: true,
+    renameStores: true,
     removeUnused: true,
+    keepMonitors: true,
     compressProcs: true,
     freqIds: true,
     dropObscuredShadows: true,
@@ -244,12 +246,12 @@
     var stages = [
       ["clean", []],
       ["safe", [
-        "stripDefaults", "shortenIds", "freqIds", "compressProcs",
-        "removeUnused", "dropObscuredShadows", "removeUnreachable",
+        "stripDefaults", "shortenIds", "freqIds",
+        "removeUnused", "keepMonitors", "dropObscuredShadows", "removeUnreachable",
         "clearInitialValues"
       ]],
       ["cleanup", [
-        "removeNoops", "simplifyIfElse", "inlineSingleCall",
+        "renameStores", "compressProcs", "removeNoops", "simplifyIfElse", "inlineSingleCall",
         "foldConstants", "propagateConstants"
       ]],
       ["optimize", [
