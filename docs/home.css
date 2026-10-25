@@ -90,11 +90,6 @@ code {
 .masthead-links a:hover { text-decoration: underline; }
 .lang-link { padding-bottom: 1px; border-bottom: 1px solid var(--rule); text-transform: none; }
 .lang-link:hover { border-color: var(--ink); }
-.local-flag {
-  display: inline-flex; align-items: center; gap: 6px;
-  border: 1px solid var(--ink); padding: 3px 7px;
-}
-.local-flag .dot { width: 6px; height: 6px; background: var(--signal); }
 .theme-switch { display: inline-flex; align-items: stretch; gap: 1px; padding: 1px; border: 1px solid var(--ink); }
 .theme-switch button {
   appearance: none; border: 0; border-radius: 0; padding: 4px 7px;
@@ -202,9 +197,6 @@ html[lang="ja"] .brand-sub { letter-spacing: 0.06em; }
   h1 { font-size: clamp(2.6rem, 13vw, 3.6rem); }
   html[lang="ja"] h1 { font-size: clamp(2.3rem, 9vw, 3rem); }
   .lead { font-size: 15px; }
-}
-@media (max-width: 480px) {
-  .local-flag { display: none; }
 }
 @media (prefers-reduced-motion: reduce) {
   * { transition-duration: 0.01ms !important; animation-duration: 0.01ms !important; }

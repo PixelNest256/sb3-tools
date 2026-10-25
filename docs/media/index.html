@@ -38,16 +38,23 @@
       <span class="brand-sub">browser media utility</span>
     </div>
     <div class="masthead-links">
-      <a class="tool-link" href="../">Home</a>
-      <a class="tool-link" href="../sb3/">SB3&nbsp;compressor</a>
-      <a class="tool-link" href="../full/">Full</a>
-      <a class="tool-link" href="../analyzer/">Analyzer</a>
+      <details class="tool-menu">
+        <summary aria-label="Tools">
+          <span class="menu-bars" aria-hidden="true"><i></i><i></i><i></i></span>
+        </summary>
+        <nav class="tool-menu-panel" aria-label="Tools">
+          <a href="../">Home</a>
+          <a href="../sb3/">project.json Compressor</a>
+          <a href="../media/" aria-current="page">SB3 Media Compressor</a>
+          <a href="../full/">SB3 Full Compressor</a>
+          <a href="../analyzer/">SB3 Analyzer</a>
+        </nav>
+      </details>
       <a class="lang-link" href="ja/" hreflang="ja" lang="ja">日本語</a>
       <div class="theme-switch" role="group" aria-label="Color theme">
         <button type="button" data-theme-set="light">Light</button>
         <button type="button" data-theme-set="dark">Dark</button>
       </div>
-      <span class="local-flag"><span class="dot" aria-hidden="true"></span>Local only</span>
     </div>
   </header>
 
@@ -259,6 +266,7 @@
   </footer>
 </div>
 
+<script src="../menu.js"></script>
 <script src="app.js"></script>
 </body>
 </html>
