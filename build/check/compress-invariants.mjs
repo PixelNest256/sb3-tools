@@ -14,11 +14,17 @@
  *   3. no input points at a block id that does not exist, and no field points
  *      at a store id that does not exist;
  *   4. blanking an initial value only happens when it shortens the JSON by a
- *      meaningful amount, so short values (numbers, booleans, "1") survive.
+ *      meaningful amount, so short values (numbers, booleans, "1") survive;
+ *   5. an argument reporter (`fields.VALUE`) keeps naming a parameter of its
+ *      own custom block: shortening argument *ids* must not rewrite argument
+ *      *names*, and merging near-duplicate code must carry a reporter from a
+ *      nested substack chain over as a parameter instead of leaving it behind
+ *      in the generated procedure.
  *
  * Invariants 1-3 were broken by "remove legacy mutation keys"; 4 by clearing
- * every overwritten value. Both reached users and made projects fail to load
- * or behave differently.
+ * every overwritten value; 5 by "shorten internal IDs" and by near-duplicate
+ * merging. All of these reached users and made projects fail to load or behave
+ * differently.
  */
 import { createRequire } from "node:module";
 import path from "node:path";
@@ -254,6 +260,262 @@ check(out.stats.monitors_removed === 1, "the hidden monitor was not removed");
 check(out.stats.dead_hide_blocks_removed === 2, "hide blocks for removed stores were not spliced out");
 check(!Object.keys(t0.blocks).some((b) => ["data_hidevariable", "data_hidelist"].includes(t0.blocks[b].opcode)),
   "a hide block for a removed store is still present");
+
+/*
+ * Extra regressions, both of which reached users as "the project breaks or the
+ * pictures move": an argument reporter whose VALUE is one of its own custom
+ * block's parameters must keep naming that parameter.
+ */
+function parseArr(value) {
+  if (Array.isArray(value)) return value;
+  if (typeof value === "string") {
+    try { return JSON.parse(value); } catch (_) { return []; }
+  }
+  return [];
+}
+
+function argReporterProblems(project) {
+  const problems = [];
+  for (const t of project.targets || []) {
+    const blocks = t.blocks || {};
+    for (const def of Object.values(blocks)) {
+      if (!def || Array.isArray(def) || def.opcode !== "procedures_definition") continue;
+      const cb = (def.inputs || {}).custom_block;
+      const proto = blocks[Array.isArray(cb) ? cb[1] : null];
+      const code = proto && proto.mutation ? proto.mutation.proccode : null;
+      const names = new Set(parseArr(proto && proto.mutation && proto.mutation.argumentnames));
+      const stack = [def.next];
+      const seen = new Set();
+      while (stack.length) {
+        const cur = stack.pop();
+        if (typeof cur !== "string" || seen.has(cur)) continue;
+        const b = blocks[cur];
+        if (!b || Array.isArray(b)) continue;
+        seen.add(cur);
+        if (typeof b.opcode === "string" && b.opcode.startsWith("argument_reporter")) {
+          const value = ((b.fields || {}).VALUE || [])[0];
+          if (typeof value === "string" && value && !names.has(value)) {
+            problems.push(`${t.name}.${cur}: reporter ${JSON.stringify(value)} inside ${JSON.stringify(code)} `
+              + `is not one of ${JSON.stringify([...names])}`);
+          }
+        }
+        for (const entry of Object.values(b.inputs || {})) {
+          if (!Array.isArray(entry)) continue;
+          for (let i = 1; i < entry.length; i++) {
+            if (typeof entry[i] === "string") stack.push(entry[i]);
+          }
+        }
+        if (typeof b.next === "string") stack.push(b.next);
+      }
+    }
+  }
+  return problems;
+}
+
+// 1. "Shorten internal IDs" used to rewrite fields.VALUE (the argument *name*)
+//    with the shortened argument *id*, so a parameter named "x" became the id
+//    of some unrelated argument.  The name and the id deliberately collide here.
+function buildCollisionProject() {
+  const NAME = "x";
+  const ID_COLLIDING = "x";
+  const ID_LONG = "argumentIdLong000001";
+  return {
+    targets: [{
+      isStage: false, name: "Sprite1",
+      variables: {}, lists: {}, broadcasts: {},
+      blocks: {
+        useHat: blk("procedures_definition", {
+          topLevel: true, x: 0, y: 0, next: "sayName", inputs: { custom_block: [1, "useProto"] }
+        }),
+        useProto: blk("procedures_prototype", {
+          shadow: true, parent: "useHat", inputs: { [ID_COLLIDING]: [1, [10, NAME]] },
+          mutation: {
+            proccode: "use %s", argumentids: JSON.stringify([ID_COLLIDING]),
+            argumentnames: JSON.stringify([NAME]), argumentdefaults: JSON.stringify([""]), warp: "false"
+          }
+        }),
+        sayName: blk("looks_say", {
+          parent: "useHat", inputs: { MESSAGE: [3, "readName", [10, ""]] }
+        }),
+        readName: blk("argument_reporter_string_number", {
+          parent: "sayName", fields: { VALUE: [NAME, null] }
+        }),
+        otherHat: blk("procedures_definition", {
+          topLevel: true, x: 0, y: 400, next: "sayOther", inputs: { custom_block: [1, "otherProto"] }
+        }),
+        otherProto: blk("procedures_prototype", {
+          shadow: true, parent: "otherHat", inputs: { [ID_LONG]: [1, [10, "k"]] },
+          mutation: {
+            proccode: "other %s", argumentids: JSON.stringify([ID_LONG]),
+            argumentnames: JSON.stringify(["k"]), argumentdefaults: JSON.stringify([""]), warp: "false"
+          }
+        }),
+        sayOther: blk("looks_say", {
+          parent: "otherHat", inputs: { MESSAGE: [3, "readOther", [10, ""]] }
+        }),
+        readOther: blk("argument_reporter_string_number", {
+          parent: "sayOther", fields: { VALUE: ["k", null] }
+        }),
+        flag2: blk("event_whenflagclicked", { topLevel: true, x: 0, y: 800, next: "callUse" }),
+        callUse: blk("procedures_call", {
+          parent: "flag2", next: "callOther",
+          mutation: { proccode: "use %s", argumentids: JSON.stringify([ID_COLLIDING]), warp: "false" },
+          inputs: { [ID_COLLIDING]: [1, [10, "1"]] }
+        }),
+        callOther: blk("procedures_call", {
+          parent: "callUse",
+          mutation: { proccode: "other %s", argumentids: JSON.stringify([ID_LONG]), warp: "false" },
+          inputs: { [ID_LONG]: [1, [10, "2"]] }
+        })
+      },
+      comments: {},
+      currentCostume: 0,
+      costumes: [{
+        name: "c", dataFormat: "svg", assetId: "0".repeat(32),
+        md5ext: "0".repeat(32) + ".svg", bitmapResolution: 1,
+        rotationCenterX: 10, rotationCenterY: 10
+      }],
+      sounds: [], volume: 100, layerOrder: 0, visible: true, x: 0, y: 0, size: 100,
+      direction: 90, draggable: false, rotationStyle: "all around"
+    }],
+    monitors: [], extensions: [], meta: { semver: "3.0.0" }
+  };
+}
+
+const collision = SB3.compressProject(buildCollisionProject(), new SB3.Options({
+  shortenIds: true,
+  compressProcs: false,
+  nearDuplicates: false,
+  extractDuplicates: false,
+  removeUnused: false
+}), () => {});
+argReporterProblems(collision.project).forEach((p) => check(false, "arg name/id collision: " + p));
+{
+  const cb = collision.project.targets[0].blocks;
+  const reporters = Object.entries(cb)
+    .filter(([, b]) => b && typeof b.opcode === "string" && b.opcode.startsWith("argument_reporter"))
+    .map(([, b]) => (b.fields.VALUE || [])[0]);
+  check(reporters.includes("x"),
+    `the reporter for the parameter "x" lost its name (reporters: ${JSON.stringify(reporters)})`);
+  check(collision.stats.arg_ids_shortened >= 2, "argument ids were not shortened in the collision project");
+}
+
+// 2. Near-duplicate merging used to scan only the first block of a SUBSTACK, so
+//    a reporter further down that substack stayed inside the generated
+//    procedure, where it no longer named a parameter and read as empty.
+function buildNestedMergeProject() {
+  const PID = "paintArgumentId00001";
+  const LAYER_ID = "layerArgumentId00001";
+  const blocks = {
+    paintHat: blk("procedures_definition", {
+      topLevel: true, x: 0, y: 0, next: "rootA", inputs: { custom_block: [1, "paintProto"] }
+    }),
+    paintProto: blk("procedures_prototype", {
+      shadow: true, parent: "paintHat",
+      inputs: { [PID]: [1, [10, "amount"]], [LAYER_ID]: [1, [10, "layer"]] },
+      mutation: {
+        proccode: "paint %s %s", argumentids: JSON.stringify([PID, LAYER_ID]),
+        argumentnames: JSON.stringify(["amount", "layer"]),
+        argumentdefaults: JSON.stringify(["", ""]), warp: "false"
+      }
+    })
+  };
+  const addCopy = (tag, literal, parent, next, text) => {
+    const root = `root${tag}`;
+    const cond = `eq${tag}`;
+    const arg = `arg${tag}`;
+    blocks[root] = blk("control_if_else", {
+      parent, next, inputs: { CONDITION: [2, cond], SUBSTACK: [2, `say${tag}1`] }
+    });
+    blocks[cond] = blk("operator_equals", {
+      parent: root, inputs: { OPERAND1: [3, arg, [10, ""]], OPERAND2: [1, [10, literal]] }
+    });
+    blocks[arg] = blk("argument_reporter_string_number", { parent: cond, fields: { VALUE: ["amount", null] } });
+    let prev = null;
+    for (let i = 1; i <= 20; i++) {
+      const id = `say${tag}${i}`;
+      const last = i === 20;
+      blocks[id] = blk("looks_say", {
+        parent: prev || root,
+        inputs: { MESSAGE: [1, [10, text + i]] }
+      });
+      if (prev) blocks[prev].next = id;
+      prev = id;
+      if (last) {
+        // The reporter sits in the *second* half of the substack chain.
+        blocks[id].inputs.MESSAGE = [3, `read${tag}`, [10, ""]];
+        blocks[`read${tag}`] = blk("argument_reporter_string_number", {
+          parent: id, fields: { VALUE: ["layer", null] }
+        });
+      }
+    }
+  };
+  addCopy("A", "1", "paintHat", "rootB", "same");
+  addCopy("B", "2", "rootA", null, "same");
+  blocks.flag3 = blk("event_whenflagclicked", { topLevel: true, x: 0, y: 600, next: "callPaint" });
+  blocks.callPaint = blk("procedures_call", {
+    parent: "flag3",
+    mutation: { proccode: "paint %s %s", argumentids: JSON.stringify([PID, LAYER_ID]), warp: "false" },
+    inputs: { [PID]: [1, [10, "3"]], [LAYER_ID]: [1, [10, "4"]] }
+  });
+  return {
+    targets: [{
+      isStage: false, name: "Sprite1",
+      variables: {}, lists: {}, broadcasts: {},
+      blocks,
+      comments: {},
+      currentCostume: 0,
+      costumes: [{
+        name: "c", dataFormat: "svg", assetId: "0".repeat(32),
+        md5ext: "0".repeat(32) + ".svg", bitmapResolution: 1,
+        rotationCenterX: 10, rotationCenterY: 10
+      }],
+      sounds: [], volume: 100, layerOrder: 0, visible: true, x: 0, y: 0, size: 100,
+      direction: 90, draggable: false, rotationStyle: "all around"
+    }],
+    monitors: [], extensions: [], meta: { semver: "3.0.0" }
+  };
+}
+
+const merged = SB3.compressProject(buildNestedMergeProject(), new SB3.Options({
+  nearDuplicates: true,
+  shortenIds: false,
+  compressProcs: false,
+  extractDuplicates: false,
+  removeUnused: false
+}), () => {});
+argReporterProblems(merged.project).forEach((p) => check(false, "nested near-duplicate: " + p));
+check(merged.stats.near_duplicates_extracted >= 1,
+  "the nested near-duplicate fixture did not merge anything (test no longer exercises the bug)");
+{
+  const blocks = merged.project.targets[0].blocks;
+  let reportersInGeneratedBodies = 0;
+  for (const def of Object.values(blocks)) {
+    if (!def || Array.isArray(def) || def.opcode !== "procedures_definition") continue;
+    const cb = (def.inputs || {}).custom_block;
+    const proto = blocks[Array.isArray(cb) ? cb[1] : null];
+    const code = (proto && proto.mutation && proto.mutation.proccode) || "";
+    if (!code.startsWith("ndup")) continue;
+    // Count reporters that belong to this definition body.
+    const stack = [def.next];
+    const seen = new Set();
+    while (stack.length) {
+      const cur = stack.pop();
+      if (typeof cur !== "string" || seen.has(cur)) continue;
+      const b = blocks[cur];
+      if (!b || Array.isArray(b)) continue;
+      seen.add(cur);
+      if (typeof b.opcode === "string" && b.opcode.startsWith("argument_reporter")) reportersInGeneratedBodies += 1;
+      for (const entry of Object.values(b.inputs || {})) {
+        if (!Array.isArray(entry)) continue;
+        for (let i = 1; i < entry.length; i++) if (typeof entry[i] === "string") stack.push(entry[i]);
+      }
+      if (typeof b.next === "string") stack.push(b.next);
+    }
+  }
+  check(reportersInGeneratedBodies >= 1,
+    "the merged procedure did not keep its argument reporter (the nested chain was not parametrised)");
+}
 
 if (failures) {
   console.error(`\n${failures} check(s) failed`);

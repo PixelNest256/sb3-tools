@@ -2226,10 +2226,24 @@
       }
     }
 
+    /*
+     * Collect the argument reporters inside the given roots, in a stable order,
+     * so a merged copy can turn them into parameters of the generated block.
+     *
+     * A root's own `next` chain is deliberately not scanned: `_findDuplicateGroup`
+     * passes every block of the chain explicitly, and `_findNearDuplicateGroup`
+     * passes one block whose `next` belongs to the surrounding script, not to
+     * the subtree being merged.  Nested chains are different: when we descend
+     * into a C-block's SUBSTACK, everything below it (including the following
+     * blocks of that substack) is copied along, so those `next` chains have to
+     * be scanned as well.  Missing them left argument reporters inside the
+     * generated procedure, where they no longer named a parameter and read as
+     * an empty string.
+     */
     _chainArgumentParams(blocks, ids) {
       const params = [];
       const kinds = new Map();
-      const scan = (bid, stack) => {
+      const scan = (bid, stack, follow) => {
         if (!isStr(bid) || !has(blocks, bid) || stack.has(bid)) return true;
         const blk = blocks[bid];
         if (!isDict(blk)) return true;
@@ -2247,6 +2261,8 @@
           }
           return true;
         }
+        const nextStack = new Set(stack);
+        nextStack.add(bid);
         if (isDict(blk.inputs)) {
           for (const key of Object.keys(blk.inputs).sort()) {
             const value = blk.inputs[key];
@@ -2254,17 +2270,18 @@
             for (let i = 1; i < value.length; i++) {
               const item = value[i];
               if (isStr(item) && has(blocks, item)) {
-                const nextStack = new Set(stack);
-                nextStack.add(bid);
-                if (!scan(item, nextStack)) return false;
+                if (!scan(item, nextStack, true)) return false;
               }
             }
           }
         }
+        if (follow && isStr(blk.next) && has(blocks, blk.next)) {
+          if (!scan(blk.next, nextStack, true)) return false;
+        }
         return true;
       };
       for (const bid of ids) {
-        if (!scan(bid, new Set())) return null;
+        if (!scan(bid, new Set(), false)) return null;
       }
       return params;
     }
@@ -3304,10 +3321,12 @@
           }
           blk.inputs = renamed;
         }
-        if (isDict(blk.fields)) {
-          const fv = blk.fields.VALUE;
-          if (isArr(fv) && fv.length && newMap.has(fv[0])) fv[0] = newMap.get(fv[0]);
-        }
+        // Note: deliberately leave `fields.VALUE` alone.  On an
+        // `argument_reporter_*` block that field holds the argument *name*, not
+        // an argument id, and names are not renamed here.  Argument ids live in
+        // a separate namespace that is local to each custom block, so renaming
+        // a name that happens to equal some other block's argument id (e.g.
+        // "x", "y", "index") would make that reporter resolve to nothing.
       }
     }
 
