@@ -1,5 +1,7 @@
 # SB3 Tools
 
+**English** · [日本語](README.ja.md)
+
 Browser-only utilities for **Scratch / TurboWarp `.sb3`** projects: three
 compressors and one analyzer. Everything runs inside the tab — there is no
 upload, no install, and no build step for the site itself.
@@ -11,10 +13,10 @@ upload, no install, and no build step for the site itself.
 
 | Path | Tool | What it does |
 | --- | --- | --- |
-| `/sb3/` | **SB3 Compressor** | Shrinks `project.json` without changing behavior. Costumes and sounds are copied through untouched. |
-| `/media/` | **Media Compressor** | Re-encodes the costumes and sounds (PNG, JPEG, SVG, WAV, MP3). `project.json` only changes where a WAV→MP3 or SVG→PNG conversion rewrites that asset's entry. |
-| `/full/` | **Full Compressor** | Runs both passes on one file and repacks once. |
-| `/analyzer/` | **Analyzer** | Reports where the bytes and blocks go, with warnings against Scratch's upload limits. Writes nothing. |
+| `/sb3/` | **project.json Compressor** | Shrinks `project.json` without changing behavior. Costumes and sounds are copied through untouched. |
+| `/media/` | **SB3 Media Compressor** | Re-encodes the costumes and sounds (PNG, JPEG, SVG, WAV, MP3). `project.json` only changes where a WAV→MP3 or SVG→PNG conversion rewrites that asset's entry. |
+| `/full/` | **SB3 Full Compressor** | Runs both passes on one file and repacks once. |
+| `/analyzer/` | **SB3 Analyzer** | Reports where the bytes and blocks go, with warnings against Scratch's upload limits. Writes nothing. |
 
 Each tool has an English page and a Japanese page (`…/ja/`). Use `docs/sb3/`,
 `docs/media/`, `docs/full/`, and `docs/analyzer/` when editing.
@@ -83,10 +85,10 @@ falls back to a single worker when nested workers are unavailable.
 docs/                 the whole site (GitHub Pages serves this folder)
   index.html          landing page (English)      · stylesheet: home.css
   ja/index.html       landing page (Japanese)
-  sb3/                SB3 Compressor   (+ ja/)
-  media/              Media Compressor (+ ja/)
-  full/               Full Compressor  (+ ja/)
-  analyzer/           Analyzer         (+ ja/)
+  sb3/                project.json Compressor (+ ja/)
+  media/              SB3 Media Compressor    (+ ja/)
+  full/               SB3 Full Compressor     (+ ja/)
+  analyzer/           SB3 Analyzer            (+ ja/)
   .nojekyll           keeps Jekyll away from the folder
   <tool>/             index.html · app.js · worker.js · styles.css · …
                       media/ and full/ also carry vendor/ codecs
