@@ -29,8 +29,10 @@
 <div class="sheet">
   <header class="masthead">
     <div class="brand">
-      <span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i></span>
-      <span class="brand-name">SB3 Full Compressor</span>
+      <a class="brand-home" href="../" aria-label="SB3 Full Compressor — home">
+        <span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i></span>
+        <span class="brand-name">SB3 Full Compressor</span>
+      </a>
       <span class="brand-sub">project + media</span>
     </div>
     <div class="masthead-links">
@@ -60,14 +62,12 @@
         <dl class="spec">
           <div><dt>Reads</dt><dd>.sb3</dd></div>
           <div><dt>Writes</dt><dd>*_full.sb3</dd></div>
-          <div><dt>Upload</dt><dd>none</dd></div>
         </dl>
       </section>
 
       <section class="panel input-panel" aria-labelledby="input-title">
         <div class="panel-head">
           <h2 id="input-title">Input</h2>
-          <span class="head-rule" aria-hidden="true"></span>
           <span class="panel-meta">.sb3</span>
         </div>
         <div id="dropzone" class="dropzone" role="button" tabindex="0"
@@ -88,7 +88,6 @@
           </div>
           <button type="button" id="clearBtn" class="text-btn">Remove</button>
         </div>
-        <p class="privacy">The file is read in this tab. Nothing is sent to a server.</p>
       </section>
 
       <section class="panel options-panel" aria-labelledby="options-title">
@@ -142,29 +141,33 @@
             </div>
           </div>
           <div class="strength" id="autoExtra">
-            <span class="strength-label">Extra</span>
-            <label class="opt opt-inline"><input type="checkbox" id="optPngOptimize"><span>PNG lossless pass (slower, ~10% smaller)</span></label>
-            <label class="opt opt-inline"><input type="checkbox" id="optSvgToPng" checked><span>SVG → PNG when the PNG is smaller</span></label>
-            <label class="opt opt-inline"><input type="checkbox" id="optMinPx" checked><span>Raise sub-pixel art to 1px</span></label>
-            <label class="opt opt-inline"><input type="checkbox" id="optWavMp3"><span>Convert WAV to MP3</span></label>
-            <select id="wavMp3Bitrate" class="select select-inline" aria-label="WAV to MP3 bitrate">
-              <option value="96" selected>96 kbps</option>
-              <option value="128">128 kbps</option>
-              <option value="64">64 kbps</option>
-            </select>
-            <label class="opt opt-inline"><input type="checkbox" id="optMp3Reenc"><span>Re-encode MP3</span></label>
-            <select id="mp3Bitrate" class="select select-inline" aria-label="MP3 bitrate">
-              <option value="64">64 kbps</option>
-              <option value="96" selected>96 kbps</option>
-              <option value="128">128 kbps</option>
-            </select>
+            <div class="extra-opt">
+              <label class="opt opt-inline"><input type="checkbox" id="optPngOptimize"><span>PNG lossless pass (slower, ~10% smaller)</span></label>
+            </div>
+            <div class="extra-opt">
+              <label class="opt opt-inline"><input type="checkbox" id="optSvgToPng" checked><span>SVG → PNG when the PNG is smaller</span></label>
+            </div>
+            <div class="extra-opt">
+              <label class="opt opt-inline"><input type="checkbox" id="optMinPx" checked><span>Raise sub-pixel art to 1px</span></label>
+            </div>
+            <div class="extra-opt">
+              <label class="opt opt-inline"><input type="checkbox" id="optWavMp3"><span>Convert WAV to MP3</span></label>
+              <select id="wavMp3Bitrate" class="select select-inline" aria-label="WAV to MP3 bitrate">
+                <option value="96" selected>96 kbps</option>
+                <option value="128">128 kbps</option>
+                <option value="64">64 kbps</option>
+              </select>
+            </div>
+            <div class="extra-opt">
+              <label class="opt opt-inline"><input type="checkbox" id="optMp3Reenc"><span>Re-encode MP3</span></label>
+              <select id="mp3Bitrate" class="select select-inline" aria-label="MP3 bitrate">
+                <option value="64">64 kbps</option>
+                <option value="96" selected>96 kbps</option>
+                <option value="128">128 kbps</option>
+              </select>
+            </div>
             <p class="options-note auto-note">The PNG lossless pass (OxiPNG) shaves a little more off each PNG but is the slowest step; it is off by default. SVG → PNG rasterises a vector costume to a palette PNG when that is smaller; turn it off to keep vectors sharp at any zoom.</p>
           </div>
-        </div>
-
-        <div class="lossy-note">
-          <span class="tag">Irreversible</span>
-          <p>Media compression discards detail on purpose, and converting WAV to MP3 or SVG to PNG rewrites <code>project.json</code>. Keep a copy of the original file — the change cannot be undone.</p>
         </div>
 
         <div class="ledger" id="ledger" hidden>
@@ -174,29 +177,6 @@
           </div>
           <div class="ledger-list" id="ledgerList"></div>
         </div>
-      </section>
-
-      <section class="notes" aria-labelledby="notes-title">
-        <div class="panel-head">
-          <h2 id="notes-title">Notes</h2>
-          <span class="head-rule" aria-hidden="true"></span>
-        </div>
-        <details>
-          <summary>What happens, in order</summary>
-          <div class="notes-body">
-            <ul>
-              <li>The <strong>media pass</strong> compresses costumes and sounds, spreading them across a pool of workers.</li>
-              <li>The <strong>project pass</strong> then shrinks <code>project.json</code>: unused data, unreachable code, repeated blocks, short IDs, and so on.</li>
-              <li>The file is repacked once. An asset or field is only changed when the result is actually smaller.</li>
-              <li>Keep a copy of the original. Media compression is lossy, and the output cannot be round-tripped back to original names.</li>
-            </ul>
-            <p class="fine">
-              This runs the same two engines as the dedicated <a href="../sb3/">SB3 Compressor</a>
-              and <a href="../media/">Media Compressor</a> tools. Use those when you want to
-              tune each asset by hand.
-            </p>
-          </div>
-        </details>
       </section>
     </div>
 

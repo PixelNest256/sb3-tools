@@ -29,8 +29,10 @@
 <div class="sheet">
   <header class="masthead">
     <div class="brand">
-      <span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i></span>
-      <span class="brand-name">SB3 Full Compressor</span>
+      <a class="brand-home" href="../../ja/" aria-label="SB3 Full Compressor — ホーム">
+        <span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i></span>
+        <span class="brand-name">SB3 Full Compressor</span>
+      </a>
       <span class="brand-sub">プロジェクト＋メディア</span>
     </div>
     <div class="masthead-links">
@@ -60,14 +62,12 @@
         <dl class="spec">
           <div><dt>読み込み</dt><dd>.sb3</dd></div>
           <div><dt>書き出し</dt><dd>*_full.sb3</dd></div>
-          <div><dt>送信</dt><dd>なし</dd></div>
         </dl>
       </section>
 
       <section class="panel input-panel" aria-labelledby="input-title">
         <div class="panel-head">
           <h2 id="input-title">入力</h2>
-          <span class="head-rule" aria-hidden="true"></span>
           <span class="panel-meta">.sb3</span>
         </div>
         <div id="dropzone" class="dropzone" role="button" tabindex="0"
@@ -88,7 +88,6 @@
           </div>
           <button type="button" id="clearBtn" class="text-btn">削除</button>
         </div>
-        <p class="privacy">ファイルはこのタブ内で読み込まれます。サーバーには送信されません。</p>
       </section>
 
       <section class="panel options-panel" aria-labelledby="options-title">
@@ -142,29 +141,33 @@
             </div>
           </div>
           <div class="strength" id="autoExtra">
-            <span class="strength-label">追加</span>
-            <label class="opt opt-inline"><input type="checkbox" id="optPngOptimize"><span>PNG 無劣化圧縮（遅い・約10%小さく）</span></label>
-            <label class="opt opt-inline"><input type="checkbox" id="optSvgToPng" checked><span>PNG の方が軽ければ SVG から変換</span></label>
-            <label class="opt opt-inline"><input type="checkbox" id="optMinPx" checked><span>1px 未満の画像を 1px に</span></label>
-            <label class="opt opt-inline"><input type="checkbox" id="optWavMp3"><span>WAV を MP3 に変換</span></label>
-            <select id="wavMp3Bitrate" class="select select-inline" aria-label="WAV→MP3 ビットレート">
-              <option value="96" selected>96 kbps</option>
-              <option value="128">128 kbps</option>
-              <option value="64">64 kbps</option>
-            </select>
-            <label class="opt opt-inline"><input type="checkbox" id="optMp3Reenc"><span>MP3 を再エンコード</span></label>
-            <select id="mp3Bitrate" class="select select-inline" aria-label="MP3 ビットレート">
-              <option value="64">64 kbps</option>
-              <option value="96" selected>96 kbps</option>
-              <option value="128">128 kbps</option>
-            </select>
+            <div class="extra-opt">
+              <label class="opt opt-inline"><input type="checkbox" id="optPngOptimize"><span>PNG 無劣化圧縮（遅い・約10%小さく）</span></label>
+            </div>
+            <div class="extra-opt">
+              <label class="opt opt-inline"><input type="checkbox" id="optSvgToPng" checked><span>PNG の方が軽ければ SVG から変換</span></label>
+            </div>
+            <div class="extra-opt">
+              <label class="opt opt-inline"><input type="checkbox" id="optMinPx" checked><span>1px 未満の画像を 1px に</span></label>
+            </div>
+            <div class="extra-opt">
+              <label class="opt opt-inline"><input type="checkbox" id="optWavMp3"><span>WAV を MP3 に変換</span></label>
+              <select id="wavMp3Bitrate" class="select select-inline" aria-label="WAV→MP3 ビットレート">
+                <option value="96" selected>96 kbps</option>
+                <option value="128">128 kbps</option>
+                <option value="64">64 kbps</option>
+              </select>
+            </div>
+            <div class="extra-opt">
+              <label class="opt opt-inline"><input type="checkbox" id="optMp3Reenc"><span>MP3 を再エンコード</span></label>
+              <select id="mp3Bitrate" class="select select-inline" aria-label="MP3 ビットレート">
+                <option value="64">64 kbps</option>
+                <option value="96" selected>96 kbps</option>
+                <option value="128">128 kbps</option>
+              </select>
+            </div>
             <p class="options-note auto-note">PNG 無劣化圧縮（OxiPNG）は PNG をわずかに小さくしますが、最も遅い工程です。既定ではオフです。SVG → PNG は、PNG の方が軽いときにベクター画像をパレット PNG に変換します（拡大しても鮮明なままにしたいときはオフにしてください）。</p>
           </div>
-        </div>
-
-        <div class="lossy-note">
-          <span class="tag">元に戻せません</span>
-          <p>メディア圧縮は、あえて情報を捨てて容量を削ります。WAV を MP3 に、SVG を PNG に変換すると <code>project.json</code> も書き換わります。元のファイルは必ず残してください。</p>
         </div>
 
         <div class="ledger" id="ledger" hidden>
@@ -174,28 +177,6 @@
           </div>
           <div class="ledger-list" id="ledgerList"></div>
         </div>
-      </section>
-
-      <section class="notes" aria-labelledby="notes-title">
-        <div class="panel-head">
-          <h2 id="notes-title">注意事項</h2>
-          <span class="head-rule" aria-hidden="true"></span>
-        </div>
-        <details>
-          <summary>処理の順番</summary>
-          <div class="notes-body">
-            <ul>
-              <li><strong>メディア圧縮</strong>でコスチュームと音を圧縮します（ワーカープールで並列処理）。</li>
-              <li>続いて<strong>プロジェクト圧縮</strong>で <code>project.json</code> を小さくします（未使用データ、到達しないコード、重複ブロック、短い ID など）。</li>
-              <li>最後に1回だけ梱包し直します。書き出しが小さくなる場合だけ差し替えます。</li>
-              <li>元のファイルは必ず残してください。メディア圧縮は不可逆で、元の名前には戻せません。</li>
-            </ul>
-            <p class="fine">
-              専用の <a href="../../sb3/ja/">SB3 圧縮</a> と <a href="../../media/ja/">メディア圧縮</a>
-              と同じ2つのエンジンを使っています。1件ずつ細かく指定したいときは、そちらを使ってください。
-            </p>
-          </div>
-        </details>
       </section>
     </div>
 

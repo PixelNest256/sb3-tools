@@ -31,8 +31,10 @@
 <div class="sheet">
   <header class="masthead">
     <div class="brand">
-      <span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i></span>
-      <span class="brand-name">SB3 Compressor</span>
+      <a class="brand-home" href="../" aria-label="SB3 Compressor — home">
+        <span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i></span>
+        <span class="brand-name">SB3 Compressor</span>
+      </a>
       <span class="brand-sub">browser file utility</span>
     </div>
     <div class="masthead-links">
@@ -63,14 +65,12 @@
         <dl class="spec">
           <div><dt>Reads</dt><dd>.sb3 / project.json</dd></div>
           <div><dt>Writes</dt><dd>*_compressed.sb3</dd></div>
-          <div><dt>Upload</dt><dd>none</dd></div>
         </dl>
       </section>
 
       <section class="panel input-panel" aria-labelledby="input-title">
         <div class="panel-head">
           <h2 id="input-title">Input</h2>
-          <span class="head-rule" aria-hidden="true"></span>
           <span class="panel-meta">.sb3 / .json</span>
         </div>
 
@@ -93,8 +93,6 @@
           </div>
           <button type="button" id="clearBtn" class="text-btn">Remove</button>
         </div>
-
-        <p class="privacy">The file is read in this tab. Nothing is sent to a server.</p>
       </section>
 
       <section class="panel options-panel" aria-labelledby="options-title">
@@ -150,47 +148,6 @@
           </fieldset>
         </div>
 
-      </section>
-
-      <section class="notes" aria-labelledby="notes-title">
-        <div class="panel-head">
-          <h2 id="notes-title">Notes</h2>
-          <span class="head-rule" aria-hidden="true"></span>
-        </div>
-        <details>
-          <summary>What gets changed, and what does not</summary>
-          <div class="notes-body">
-            <p>
-              The compressor works only on the project data inside the zip.
-              Costumes and sounds are copied through unchanged.
-            </p>
-            <ul>
-              <li>Block IDs become short generated IDs. Variable, list, and broadcast names and custom-block proccodes can be shortened too — with that off, every name stays as it was.</li>
-              <li>Monitors are kept by default: the stores they show are neither removed nor renamed, so the stage looks the same.</li>
-              <li>Unused stores, unreachable scripts, and default-valued fields are removed.</li>
-              <li>Repeated or near-repeated code becomes a new custom block when that makes the file smaller.</li>
-              <li>Original names cannot be recovered from the output. Keep a copy of the original file.</li>
-            </ul>
-            <p class="fine">
-              The output keeps the <code>parent: null</code> and end-of-stack
-              <code>next: null</code> markers that the Scratch VM interpreter
-              relies on.
-            </p>
-          </div>
-        </details>
-        <details>
-          <summary>Proof of behavior</summary>
-          <div class="notes-body">
-            <p>
-              Every pass is kept only when the serialized
-              <code>project.json</code> actually gets smaller, and the markers
-              the Scratch VM relies on (an explicit <code>parent: null</code>
-              and an end-of-stack <code>next: null</code>) are preserved. The
-              output opens and runs the same in Scratch and TurboWarp. Keep a
-              copy of the original file, because the transformation is one-way.
-            </p>
-          </div>
-        </details>
       </section>
     </div>
 

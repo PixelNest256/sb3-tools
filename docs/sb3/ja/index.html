@@ -31,8 +31,10 @@
 <div class="sheet">
   <header class="masthead">
     <div class="brand">
-      <span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i></span>
-      <span class="brand-name">SB3 Compressor</span>
+      <a class="brand-home" href="../../ja/" aria-label="SB3 Compressor — ホーム">
+        <span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i></span>
+        <span class="brand-name">SB3 Compressor</span>
+      </a>
       <span class="brand-sub">ブラウザ内ツール</span>
     </div>
     <div class="masthead-links">
@@ -63,14 +65,12 @@
         <dl class="spec">
           <div><dt>読み込み</dt><dd>.sb3 / project.json</dd></div>
           <div><dt>書き出し</dt><dd>*_compressed.sb3</dd></div>
-          <div><dt>送信</dt><dd>なし</dd></div>
         </dl>
       </section>
 
       <section class="panel input-panel" aria-labelledby="input-title">
         <div class="panel-head">
           <h2 id="input-title">入力</h2>
-          <span class="head-rule" aria-hidden="true"></span>
           <span class="panel-meta">.sb3 / .json</span>
         </div>
 
@@ -93,8 +93,6 @@
           </div>
           <button type="button" id="clearBtn" class="text-btn">削除</button>
         </div>
-
-        <p class="privacy">ファイルはこのタブ内で読み込まれます。サーバーには送信されません。</p>
       </section>
 
       <section class="panel options-panel" aria-labelledby="options-title">
@@ -150,46 +148,6 @@
           </fieldset>
         </div>
 
-      </section>
-
-      <section class="notes" aria-labelledby="notes-title">
-        <div class="panel-head">
-          <h2 id="notes-title">注意事項</h2>
-          <span class="head-rule" aria-hidden="true"></span>
-        </div>
-        <details>
-          <summary>変わること、変わらないこと</summary>
-          <div class="notes-body">
-            <p>
-              圧縮するのは zip 内のプロジェクトデータだけです。コスチュームと
-              音はそのままコピーされます。
-            </p>
-            <ul>
-              <li>ブロック ID は短い生成 ID になります。変数名・リスト名・ブロードキャスト名やカスタムブロック名の短縮は別オプションで、オフにすれば名前はそのまま残ります。</li>
-              <li>モニターは既定で保持されます。表示している変数・リストは削除も改名もされないので、ステージの見た目は変わりません。</li>
-              <li>未使用の変数、到達しないスクリプト、既定値のフィールドは削除されます。</li>
-              <li>繰り返しや似たコードは、ファイルが小さくなる場合に限り、新しいカスタムブロックになります。</li>
-              <li>元の名前は出力から復元できません。元のファイルは必ず残しておいてください。</li>
-            </ul>
-            <p class="fine">
-              出力は、Scratch VM が参照する <code>parent: null</code> と
-              スタック末尾の <code>next: null</code> を保持します。
-            </p>
-          </div>
-        </details>
-        <details>
-          <summary>動作の根拠</summary>
-          <div class="notes-body">
-            <p>
-              各パスは、書き出した <code>project.json</code> が実際に小さくなる
-              場合だけ採用します。Scratch VM が参照する値（明示的な
-              <code>parent: null</code> と、スタック末尾の
-              <code>next: null</code>）は保持します。出力は Scratch /
-              TurboWarp でこれまでと同じように開いて動きます。一方で戻せない
-              変換なので、元のファイルは必ず残してください。
-            </p>
-          </div>
-        </details>
       </section>
     </div>
 

@@ -31,8 +31,10 @@
 <div class="sheet">
   <header class="masthead">
     <div class="brand">
-      <span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i></span>
-      <span class="brand-name">SB3 Media Compressor</span>
+      <a class="brand-home" href="../" aria-label="SB3 Media Compressor — home">
+        <span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i></span>
+        <span class="brand-name">SB3 Media Compressor</span>
+      </a>
       <span class="brand-sub">browser media utility</span>
     </div>
     <div class="masthead-links">
@@ -64,14 +66,12 @@
         <dl class="spec">
           <div><dt>Reads</dt><dd>.sb3</dd></div>
           <div><dt>Writes</dt><dd>*_media.sb3</dd></div>
-          <div><dt>Upload</dt><dd>none</dd></div>
         </dl>
       </section>
 
       <section class="panel input-panel" aria-labelledby="input-title">
         <div class="panel-head">
           <h2 id="input-title">Input</h2>
-          <span class="head-rule" aria-hidden="true"></span>
           <span class="panel-meta">.sb3</span>
         </div>
 
@@ -94,8 +94,6 @@
           </div>
           <button type="button" id="clearBtn" class="text-btn">Remove</button>
         </div>
-
-        <p class="privacy">The file is read in this tab. Nothing is sent to a server.</p>
       </section>
 
       <section class="panel options-panel" aria-labelledby="options-title">
@@ -124,29 +122,33 @@
           </div>
 
           <div class="strength" id="autoExtra">
-            <span class="strength-label">Extra</span>
-            <label class="opt opt-inline"><input type="checkbox" id="optPngOptimize"><span>PNG lossless pass (slower, ~10% smaller)</span></label>
-            <label class="opt opt-inline"><input type="checkbox" id="optSvgToPng" checked><span>SVG → PNG when the PNG is smaller</span></label>
-            <label class="opt opt-inline"><input type="checkbox" id="optMinPx" checked><span>Raise sub-pixel art to 1px</span></label>
-            <label class="opt opt-inline"><input type="checkbox" id="optWavMp3"><span>Convert WAV to MP3</span></label>
-            <select id="wavMp3Bitrate" class="select select-inline" aria-label="WAV to MP3 bitrate">
-              <option value="96" selected>96 kbps</option>
-              <option value="128">128 kbps</option>
-              <option value="64">64 kbps</option>
-            </select>
-            <label class="opt opt-inline"><input type="checkbox" id="optMp3Reenc"><span>Re-encode MP3</span></label>
-            <select id="mp3Bitrate" class="select select-inline" aria-label="MP3 bitrate">
-              <option value="64">64 kbps</option>
-              <option value="96" selected>96 kbps</option>
-              <option value="128">128 kbps</option>
-            </select>
+            <div class="extra-opt">
+              <label class="opt opt-inline"><input type="checkbox" id="optPngOptimize"><span>PNG lossless pass (slower, ~10% smaller)</span></label>
+            </div>
+            <div class="extra-opt">
+              <label class="opt opt-inline"><input type="checkbox" id="optSvgToPng" checked><span>SVG → PNG when the PNG is smaller</span></label>
+            </div>
+            <div class="extra-opt">
+              <label class="opt opt-inline"><input type="checkbox" id="optMinPx" checked><span>Raise sub-pixel art to 1px</span></label>
+            </div>
+            <div class="extra-opt">
+              <label class="opt opt-inline"><input type="checkbox" id="optWavMp3"><span>Convert WAV to MP3</span></label>
+              <select id="wavMp3Bitrate" class="select select-inline" aria-label="WAV to MP3 bitrate">
+                <option value="96" selected>96 kbps</option>
+                <option value="128">128 kbps</option>
+                <option value="64">64 kbps</option>
+              </select>
+            </div>
+            <div class="extra-opt">
+              <label class="opt opt-inline"><input type="checkbox" id="optMp3Reenc"><span>Re-encode MP3</span></label>
+              <select id="mp3Bitrate" class="select select-inline" aria-label="MP3 bitrate">
+                <option value="64">64 kbps</option>
+                <option value="96" selected>96 kbps</option>
+                <option value="128">128 kbps</option>
+              </select>
+            </div>
             <p class="options-note auto-note">The PNG lossless pass (OxiPNG) shaves a little more off each PNG but is the slowest step; it is off by default. SVG → PNG rasterises a vector costume to a palette PNG when that is smaller; turn it off to keep vectors sharp at any zoom.</p>
           </div>
-        </div>
-
-        <div class="lossy-note">
-          <span class="tag">Irreversible</span>
-          <p>Image and sound compression discards detail on purpose. Converting WAV to MP3 or SVG to PNG also rewrites <code>project.json</code>. Keep a copy of the original file — the change cannot be undone.</p>
         </div>
 
         <div class="ledger" id="ledger" hidden>
@@ -161,47 +163,6 @@
             <button type="button" id="compressBtn" class="btn-line">Compress media</button>
           </div>
         </div>
-      </section>
-
-      <section class="notes" aria-labelledby="notes-title">
-        <div class="panel-head">
-          <h2 id="notes-title">Notes</h2>
-          <span class="head-rule" aria-hidden="true"></span>
-        </div>
-        <details>
-          <summary>What gets re-encoded, and how</summary>
-          <div class="notes-body">
-            <ul>
-              <li><strong>PNG costumes</strong> are reduced to a palette and written back as indexed PNGs, then squeezed losslessly by <strong>OxiPNG</strong>. A palette that keeps transparency or a dithered palette can be chosen.</li>
-              <li><strong>JPEG costumes</strong> are re-encoded by <strong>MozJPEG</strong> at the quality you choose. Their pixel size is never changed, so rotation centres stay valid.</li>
-              <li><strong>SVG costumes</strong> are optimised by <strong>SVGO</strong> (comments, metadata, editor namespaces, path data, and excess digits). A palette <strong>PNG</strong> at the same pixel size replaces the SVG when it is smaller; art under 1px is rendered at 1px so the PNG is never zero-sized.</li>
-              <li><strong>WAV sounds</strong> are resampled with a band-limited filter, downmixed if you like, or converted to <strong>MP3</strong> with the LAME encoder.</li>
-              <li><strong>MP3 sounds</strong> can have their ID3 tags stripped, or be re-decoded and re-encoded at a lower bitrate.</li>
-              <li>An asset is only replaced when the new bytes are actually smaller. Anything else is kept as-is.</li>
-            </ul>
-            <p class="fine">
-              File names and formats only change for a WAV→MP3 or SVG→PNG
-              conversion; those update that asset's <code>md5ext</code>,
-              <code>dataFormat</code>, and (for a rasterised costume)
-              <code>bitmapResolution</code> in <code>project.json</code>.
-              Everything else leaves <code>project.json</code> byte-for-byte
-              identical. The Scratch VM loads each costume and sound by its
-              name, so the project opens and runs the same.
-            </p>
-          </div>
-        </details>
-        <details>
-          <summary>Manual mode</summary>
-          <div class="notes-body">
-            <p>
-              Manual mode lists every image and sound in the project and lets
-              you set the method for each one — a palette size for PNG, a
-              quality for JPEG, a sample rate for WAV, and so on. Use
-              <em>Auto defaults for all</em> to start from the current strength,
-              then tune the assets that matter.
-            </p>
-          </div>
-        </details>
       </section>
     </div>
 
