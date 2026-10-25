@@ -140,7 +140,19 @@ function buildProject() {
       currentCostume: 0,
       costumes: [{
         name: "c", dataFormat: "svg", assetId: "0".repeat(32),
+        md5ext: "0".repeat(32) + ".svg", bitmapResolution: 1,
         rotationCenterX: 96.99250489598867, rotationCenterY: 61.39895949833303
+      }, {
+        // Loading a bitmap with bitmapResolution 1 is what tells scratch-vm to
+        // double it; an explicit 0 rotation centre is the top-left corner.
+        name: "bmp1", dataFormat: "png", assetId: "1".repeat(32),
+        md5ext: "1".repeat(32) + ".png", bitmapResolution: 1,
+        rotationCenterX: 0, rotationCenterY: 0
+      }, {
+        // md5ext that disagrees with assetId.dataFormat must not be dropped.
+        name: "odd", dataFormat: "png", assetId: "2".repeat(32),
+        md5ext: "deadbeef.png", bitmapResolution: 2,
+        rotationCenterX: 10, rotationCenterY: 20
       }],
       sounds: [],
       volume: 100, layerOrder: 0, visible: true, x: 0, y: 0, size: 100,
@@ -226,6 +238,17 @@ if (lists.length === 1) {
 
 const costume = t0.costumes[0];
 check(Number(costume.rotationCenterX.toFixed(4)) === costume.rotationCenterX, "rotation centre was not rounded");
+check(costume.md5ext === undefined, "a matching md5ext was not removed");
+check(costume.bitmapResolution === undefined, "bitmapResolution on an SVG costume was not removed");
+
+const byName = Object.fromEntries((t0.costumes || []).map((c) => [c.name, c]));
+check(byName.bmp1 && byName.bmp1.bitmapResolution === 1,
+  "bitmapResolution: 1 on a bitmap was removed (it would render at half size)");
+check(byName.bmp1 && byName.bmp1.rotationCenterX === 0 && byName.bmp1.rotationCenterY === 0,
+  "rotationCenterX/Y: 0 was removed (the pivot would move to the image centre)");
+check(byName.bmp1 && byName.bmp1.md5ext === undefined, "a matching md5ext was not removed");
+check(byName.odd && byName.odd.md5ext === "deadbeef.png",
+  "an md5ext that disagrees with assetId.dataFormat was removed");
 check(SB3.dumpsCompact(out.project).length > 0, "serialization failed");
 check(out.stats.monitors_removed === 1, "the hidden monitor was not removed");
 check(out.stats.dead_hide_blocks_removed === 2, "hide blocks for removed stores were not spliced out");

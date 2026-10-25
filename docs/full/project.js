@@ -1138,19 +1138,29 @@
         }
         for (const cos of (isArr(tgt.costumes) ? tgt.costumes : [])) {
           if (!isDict(cos)) continue;
-          if (has(cos, "bitmapResolution") && looseEq(cos.bitmapResolution, 1)) {
+          // `bitmapResolution` is ignored for SVG costumes, but it is
+          // load-bearing for bitmaps: scratch-vm doubles a bitmap only when it
+          // sees exactly 1 (load-costume.js: `scale = bitmapResolution === 1 ?
+          // 2 : 1`) and then records it as resolution 2.  Without the key the
+          // pixels stay 1x while the costume is still treated as resolution 2,
+          // so it renders at half size.  Drop it for SVG only.
+          // `rotationCenterX/Y: 0` is never droppable: an explicit 0 is the
+          // top-left corner, while a missing key makes the VM use the centre of
+          // the image as the pivot.
+          // `md5ext` is only redundant when it matches assetId.dataFormat, the
+          // name the VM actually reads out of the zip.  Keep any other value so
+          // an unusual project still loads the same file it did before.
+          if (has(cos, "bitmapResolution") && isStr(cos.dataFormat) &&
+              cos.dataFormat.toLowerCase() === "svg" && looseEq(cos.bitmapResolution, 1)) {
             delete cos.bitmapResolution;
             st.fields_removed += 1;
           }
-          if (has(cos, "md5ext")) {
+          if (has(cos, "md5ext") && isStr(cos.assetId) && isStr(cos.dataFormat) &&
+              cos.md5ext === `${cos.assetId}.${cos.dataFormat}`) {
             delete cos.md5ext;
             st.fields_removed += 1;
           }
           for (const key of ["rotationCenterX", "rotationCenterY"]) {
-            if (has(cos, key) && looseEq(cos[key], 0)) {
-              delete cos[key];
-              st.fields_removed += 1;
-            }
             const v = cos[key];
             if (typeof v === "number" && Number.isFinite(v) && !Number.isInteger(v)) {
               const r = Number(v.toFixed(4));
