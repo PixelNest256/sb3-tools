@@ -251,7 +251,7 @@
         noop_messages_removed: 0, procs_inlined: 0, const_values_folded: 0,
         loops_created: 0, loop_blocks_saved: 0,
         const_vars_inlined: 0, const_reads_inlined: 0,
-        arg_ids_shortened: 0, mutation_keys_removed: 0, monitors_removed: 0,
+        arg_ids_shortened: 0, mutation_keys_added: 0, monitors_removed: 0,
         comments_removed: 0, workspace_compacted: 0, float_values_rounded: 0
       };
       this.varMap = new Map();
@@ -1045,6 +1045,11 @@
             if (!isArr(ent) || ent.length < 2) continue;
             if (!eligible("v", vid)) continue;
             if (ent[1] === "") continue;
+            const oldSize = JSON.stringify(ent[1]);
+            // Blanking must save a meaningful amount of JSON.  A short value
+            // (a number, a boolean, "1") is barely shorter than "" while still
+            // changing what the project stores, so leave those alone.
+            if (!oldSize || oldSize.length < 6) continue;
             const name = ent.length ? ent[0] : this.varOrigName.get(vid);
             if (canClear("v", vid, name)) {
               ent[1] = "";
@@ -1057,6 +1062,8 @@
             if (!isArr(ent) || ent.length < 2) continue;
             if (!eligible("l", lid)) continue;
             if (isArr(ent[1]) && ent[1].length === 0) continue;
+            const oldSize = JSON.stringify(ent[1]);
+            if (!oldSize || oldSize.length < 6) continue;
             const name = ent.length ? ent[0] : this.listOrigName.get(lid);
             if (canClear("l", lid, name)) {
               ent[1] = [];
@@ -1165,7 +1172,7 @@
       }
       if (isDict(blocks) && Object.keys(blocks).length) {
         this._normalizeParentMarkers(blocks);
-        if (o.stripDefaults) this._stripLegacyMutationKeys(blocks);
+        this._normalizeMutations(blocks);
       }
       if (o.compressProcs && isDict(blocks) && Object.keys(blocks).length) {
         this._compressProcs(blocks);
@@ -3180,19 +3187,22 @@
       }
     }
 
-    _stripLegacyMutationKeys(blocks) {
+    _normalizeMutations(blocks) {
+      // scratch-vm's Blocks.mutationToXML() reads `mutation.tagName` and
+      // iterates `mutation.children`, so every mutation must carry both.
+      // Exported projects sometimes drop them; without them the Scratch editor
+      // and any VM that emits a workspace update fail to load the project.
       const st = this.stats;
       for (const blk of Object.values(blocks)) {
         if (!isDict(blk) || !isDict(blk.mutation)) continue;
         const mut = blk.mutation;
-        const children = mut.children;
-        if (isArr(children) && children.length === 0) {
-          delete mut.children;
-          st.mutation_keys_removed += 1;
-          if (has(mut, "tagName")) {
-            delete mut.tagName;
-            st.mutation_keys_removed += 1;
-          }
+        if (!isStr(mut.tagName)) {
+          mut.tagName = "mutation";
+          st.mutation_keys_added += 1;
+        }
+        if (!isArr(mut.children)) {
+          mut.children = [];
+          st.mutation_keys_added += 1;
         }
       }
     }

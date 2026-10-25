@@ -79,10 +79,25 @@ docs/                 the whole site (GitHub Pages serves this folder)
   <tool>/             index.html · app.js · worker.js · styles.css · …
                       media/ and full/ also carry vendor/ codecs
 build/media/          esbuild script that produces the vendored codecs (dev only)
+build/check/          regression checks for the project pass (dev only)
 LICENSE               MIT
 ```
 
-Only `build/media/` needs Node. The site is plain static files.
+Only `build/` needs Node. The site is plain static files.
+
+## Regression checks
+
+`build/check/compress-invariants.mjs` compresses a small synthetic project and
+asserts the invariants the Scratch VM and its editor rely on: every block
+mutation keeps `tagName` and `children`, top-level blocks keep
+`parent: null`, reachable stack ends keep `next: null`, no input or field points
+at something that was deleted, and initial-value blanking only happens when it
+saves a meaningful amount of JSON. Run it after touching
+`docs/sb3/compressor.js` or `docs/full/project.js`:
+
+```console
+node build/check/compress-invariants.mjs
+```
 
 ## Vendored codecs
 
