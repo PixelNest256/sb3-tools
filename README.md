@@ -28,8 +28,14 @@ Each tool has an English page and a Japanese page (`…/ja/`). Use `docs/sb3/`,
 - **Rename** block IDs to short generated IDs. Variable, list, and message
   names, plus custom-block proccodes and arguments, are only shortened when the
   matching option is on — with just IDs shortened, every name stays as it was.
-  Shortened stores are numbered per target, so an ID is only as long as that
-  sprite (or the stage) actually needs; dropping unused stores leaves no gaps.
+  Store IDs are numbered once across the whole project: a sprite resolves an ID
+  in its own map first and then on the stage, so reusing an ID between two
+  targets would silently retarget one of them. Names are numbered per scope
+  instead. The stage goes first and avoids every name that has to survive
+  anywhere, because a stage name is visible from every sprite; sprites then
+  avoid the stage's final names. Two sprites may reuse the same local name,
+  which is legal in Scratch and saves the most space. Dropping unused stores
+  leaves no gaps in either sequence.
 - **Keep** monitors by default: the variable or list a monitor shows is neither
   dropped nor renamed, and the monitor keeps its position, so the stage looks
   the same. Turning on "don't keep monitors" (the **Maximum** preset) drops

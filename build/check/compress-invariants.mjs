@@ -867,6 +867,178 @@ const repeatOff = SB3.compressProject(buildRepeatReporterProject(), new SB3.Opti
 check(repeatOff.stats.optimization_passes === 1,
   "the loop ran extra passes with all three repeatable steps disabled");
 
+/*
+ * 5. Store scoping across targets.  scratch-vm resolves a store id in the
+ *    sprite first and then in the stage, so an id reused by two targets makes
+ *    a sprite's global reads hit its own store.  The editor also rejects a
+ *    stage variable whose name equals any sprite's local variable.  Check both
+ *    rules, while still allowing two sprites to share a local name (which is
+ *    legal and saves the most space).
+ */
+function buildScopeProject() {
+  const GV_SCORE = "globalScore000000001";
+  const GL_GLOBAL = "globalList0000000001";
+  const S1_VAR = "spriteOneLocal000001";
+  const S1_LIST = "spriteOneList0000001";
+  const S2_VAR = "spriteTwoLocal000001";
+  const S2_LIST = "spriteTwoList0000001";
+  return {
+    targets: [{
+      isStage: false, name: "Sprite1",
+      variables: { [S1_VAR]: ["localOne", 0] },
+      lists: { [S1_LIST]: ["listOne", []] },
+      broadcasts: {},
+      blocks: {
+        flag: blk("event_whenflagclicked", { topLevel: true, x: 0, y: 0, next: "setLocal" }),
+        setLocal: blk("data_setvariableto", {
+          parent: "flag", next: "changeGlobal",
+          inputs: { VALUE: [1, [10, "1"]] },
+          fields: { VARIABLE: ["localOne", S1_VAR] }
+        }),
+        changeGlobal: blk("data_changevariableby", {
+          parent: "setLocal", next: "addGlobal",
+          inputs: { VALUE: [1, [4, "1"]] },
+          fields: { VARIABLE: ["score", GV_SCORE] }
+        }),
+        addGlobal: blk("data_addtolist", {
+          parent: "changeGlobal", next: "addLocal",
+          inputs: { ITEM: [1, [10, "1"]] },
+          fields: { LIST: ["highscores", GL_GLOBAL] }
+        }),
+        addLocal: blk("data_addtolist", {
+          parent: "addGlobal", next: "sayGlobal",
+          inputs: { ITEM: [1, [10, "2"]] },
+          fields: { LIST: ["listOne", S1_LIST] }
+        }),
+        sayGlobal: blk("looks_say", {
+          parent: "addLocal",
+          inputs: { MESSAGE: [3, "readGlobal", [10, ""]] }
+        }),
+        readGlobal: blk("data_variable", {
+          parent: "sayGlobal", fields: { VARIABLE: ["score", GV_SCORE] }
+        })
+      },
+      costumes: [], sounds: []
+    }, {
+      isStage: true, name: "Stage",
+      variables: { [GV_SCORE]: ["score", 0] },
+      lists: { [GL_GLOBAL]: ["highscores", []] },
+      broadcasts: {}, blocks: {}, costumes: [], sounds: []
+    }, {
+      isStage: false, name: "Sprite2",
+      variables: { [S2_VAR]: ["localTwo", 0] },
+      lists: { [S2_LIST]: ["listTwo", []] },
+      broadcasts: {},
+      blocks: {
+        flag2: blk("event_whenflagclicked", { topLevel: true, x: 0, y: 0, next: "setLocal2" }),
+        setLocal2: blk("data_setvariableto", {
+          parent: "flag2", next: "addLocal2",
+          inputs: { VALUE: [1, [10, "1"]] },
+          fields: { VARIABLE: ["localTwo", S2_VAR] }
+        }),
+        addLocal2: blk("data_addtolist", {
+          parent: "setLocal2",
+          inputs: { ITEM: [1, [10, "2"]] },
+          fields: { LIST: ["listTwo", S2_LIST] }
+        })
+      },
+      costumes: [], sounds: []
+    }],
+    extensions: [], meta: { semver: "3.0.0" }
+  };
+}
+
+// Keep the scoping checks independent of constant folding and other rewrites:
+// only the store numbering/renaming path is under test here.
+const SCOPE_OPTIONS = {
+  removeMonitors: true,
+  propagateConstants: false,
+  foldConstants: false,
+  simplifyIfElse: false,
+  removeNoops: false,
+  inlineSingleCall: false,
+  extractDuplicates: false,
+  nearDuplicates: false,
+  loopDuplicates: false,
+  reuseReporters: false,
+  compressProcs: false,
+  clearInitialValues: false,
+  stripDefaults: false
+};
+
+const namesOfStores = (table) =>
+  Object.values(table || {}).map((v) => (Array.isArray(v) ? v[0] : v));
+const idsOfTarget = (t) => [
+  ...Object.keys(t.variables || {}),
+  ...Object.keys(t.lists || {})
+];
+
+function checkScopeProject(project, label) {
+  const storeIds = project.targets.flatMap(idsOfTarget);
+  check(new Set(storeIds).size === storeIds.length,
+    `${label}: store ids repeat across targets (${JSON.stringify(storeIds)})`);
+  const stage = project.targets.find((t) => t.isStage);
+  const sprites = project.targets.filter((t) => !t.isStage);
+  for (const sprite of sprites) {
+    for (const key of ["variables", "lists"]) {
+      const stageNames = new Set(namesOfStores(stage[key]));
+      const clash = namesOfStores(sprite[key]).filter((n) => stageNames.has(n));
+      check(!clash.length,
+        `${label}: ${sprite.name} ${key} reuse the stage name(s) ${JSON.stringify(clash)}`);
+    }
+  }
+  return { stage, sprites };
+}
+
+const scopeOut = SB3.compressProject(buildScopeProject(),
+  new SB3.Options(SCOPE_OPTIONS), () => {});
+audit(scopeOut.project);
+const scope = checkScopeProject(scopeOut.project, "removeMonitors");
+const [scopeS1, scopeS2] = scope.sprites;
+check(namesOfStores(scopeS1.variables)[0] === namesOfStores(scopeS2.variables)[0],
+  "two sprites no longer share the shortest local variable name");
+check(namesOfStores(scopeS1.lists)[0] === namesOfStores(scopeS2.lists)[0],
+  "two sprites no longer share the shortest local list name");
+
+const readGlobal = Object.values(scopeS1.blocks || {}).find(
+  (b) => b && !Array.isArray(b) && b.opcode === "data_variable");
+check(!!readGlobal, "the scope fixture lost its global read");
+if (readGlobal) {
+  const [name, id] = readGlobal.fields.VARIABLE;
+  check(!!scope.stage.variables[id] && scope.stage.variables[id][0] === name,
+    "a sprite's read of a stage variable no longer points at the stage store");
+  check(!(id in (scopeS1.variables || {})),
+    "a sprite's read of a stage variable resolves to its own store id");
+}
+const setLocal = Object.values(scopeS1.blocks || {}).find(
+  (b) => b && !Array.isArray(b) && b.opcode === "data_setvariableto");
+check(!!setLocal, "the scope fixture lost its local write");
+if (setLocal) {
+  const [name, id] = setLocal.fields.VARIABLE;
+  check(!!scopeS1.variables[id] && scopeS1.variables[id][0] === name,
+    "a sprite's local write no longer points at its own store");
+}
+
+// A monitor keeps a sprite-local name that is already a short string.  The
+// stage must skip that name, and a later sprite may still reuse it locally.
+const keptScopeProject = buildScopeProject();
+keptScopeProject.targets[2].variables.spriteTwoLocal000001 = ["A", 0];
+keptScopeProject.monitors = [{
+  id: "spriteTwoLocal000001", opcode: "data_variable", params: { VARIABLE: "A" },
+  spriteName: "Sprite2", x: 1, y: 2, visible: false, mode: "default",
+  width: 0, height: 0, sliderMin: 0, sliderMax: 100, isDiscrete: true
+}];
+const keptScopeOut = SB3.compressProject(keptScopeProject,
+  new SB3.Options(Object.assign({}, SCOPE_OPTIONS, { removeMonitors: false })), () => {});
+audit(keptScopeOut.project);
+const keptScope = checkScopeProject(keptScopeOut.project, "kept monitor");
+const keptS2 = keptScope.sprites.find((t) => t.name === "Sprite2");
+check(keptS2.variables.spriteTwoLocal000001 &&
+  keptS2.variables.spriteTwoLocal000001[0] === "A",
+  "a kept monitor store was renamed");
+check(!namesOfStores(keptScope.stage.variables).includes("A"),
+  "the stage reused a sprite's kept local variable name");
+
 if (failures) {
   console.error(`\n${failures} check(s) failed`);
   process.exit(1);

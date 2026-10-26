@@ -385,6 +385,11 @@
           this.droppedVarIds = new Set([...this.varMap.keys()].filter((k) => !this.usedVarIds.has(k)));
           this.droppedListIds = new Set([...this.listMap.keys()].filter((k) => !this.usedListIds.has(k)));
           this._compactStoreMappings(targets);
+        } else if (this.droppedVarIds.size || this.droppedListIds.size) {
+          // With `removeUnused` off every store normally survives, but the
+          // constant inliner can still delete the store it folded away.  That
+          // leaves a hole in the numbering, so pack the survivors again.
+          this._compactStoreMappings(targets);
         }
         this._compactBroadcasts(targets);
         this._renameStores(targets);
@@ -525,24 +530,15 @@
     }
 
     // ------------------------------------------------------------------
-    // Shortest-free-string allocators for one target.  Ids are shared by
-    // variables and lists (the VM keeps both in one map), names are counted
-    // per kind.  The "☁ " marker on cloud variables is required by Scratch,
-    // so it is added around the short name rather than being counted as part
-    // of it.  Cloud and ordinary names therefore have their own counters: a
-    // cloud variable may take "☁ A" while an ordinary one also takes "A",
-    // because the marker alone keeps the two names distinct.
-    _storeGenerators(reservedStoreIds, reservedVarNames, reservedListNames) {
-      let storeSeq = 0, varNameSeq = 0, cloudNameSeq = 0, listNameSeq = 0;
+    // Shortest-free-string allocators.  The "☁ " marker on cloud variables is
+    // required by Scratch, so it is added around the short name rather than
+    // being counted as part of it.  Cloud and ordinary names therefore have
+    // their own counters: a cloud variable may take "☁ A" while an ordinary
+    // one also takes "A", because the marker alone keeps the two names
+    // distinct.
+    _storeNameGenerators(reservedVarNames, reservedListNames) {
+      let varNameSeq = 0, cloudNameSeq = 0, listNameSeq = 0;
       return {
-        nextStoreId: () => {
-          let id;
-          do {
-            storeSeq += 1;
-            id = encodeId(storeSeq);
-          } while (reservedStoreIds.has(id));
-          return id;
-        },
         nextVarName: (cloud) => {
           let name;
           do {
@@ -565,6 +561,152 @@
           return name;
         }
       };
+    }
+
+    _storeGenerators(reservedStoreIds, reservedVarNames, reservedListNames) {
+      let storeSeq = 0;
+      return {
+        nextStoreId: () => {
+          let id;
+          do {
+            storeSeq += 1;
+            id = encodeId(storeSeq);
+          } while (reservedStoreIds.has(id));
+          return id;
+        },
+        ...this._storeNameGenerators(reservedVarNames, reservedListNames)
+      };
+    }
+
+    // Number every surviving store.  Ids are shared by variables and lists
+    // (the VM keeps both in one map) and are numbered across the whole
+    // project: a sprite looks an id up in its own map first and then in the
+    // stage's, so an id reused by two targets would silently retarget one of
+    // them.  Names are counted per kind and per scope.  The stage is numbered
+    // first and avoids every name that has to stay, because a stage name is
+    // visible from every sprite.  Sprite names then avoid the stage's final
+    // names; sprite-to-sprite repeats are legal (each target keeps its own
+    // map) and save the most space.
+    _planStoreMappings(targets, dropV, dropL) {
+      const keepV = this.keptMonVarIds, keepL = this.keptMonListIds;
+      const renameStores = this.options.renameStores;
+      const infos = [];
+      const keptIds = new Set();
+      const keptVarNames = new Set();
+      const keptListNames = new Set();
+      let stageInfo = null;
+      for (const tgt of targets) {
+        if (!isDict(tgt)) continue;
+        const info = {
+          tgt,
+          tname: isStr(tgt.name) ? tgt.name : null,
+          vars: [],
+          lists: []
+        };
+        for (const [id, ent] of Object.entries(isDict(tgt.variables) ? tgt.variables : {})) {
+          if (dropV && dropV.has(id)) continue;
+          const name = isArr(ent) && ent.length ? ent[0] : String(ent);
+          const kept = keepV.has(id);
+          info.vars.push({ id, name, kept });
+          if (kept) {
+            keptIds.add(id);
+            if (isStr(name)) keptVarNames.add(name);
+          }
+        }
+        for (const [id, ent] of Object.entries(isDict(tgt.lists) ? tgt.lists : {})) {
+          if (dropL && dropL.has(id)) continue;
+          const name = isArr(ent) && ent.length ? ent[0] : String(ent);
+          const kept = keepL.has(id);
+          info.lists.push({ id, name, kept });
+          if (kept) {
+            keptIds.add(id);
+            if (isStr(name)) keptListNames.add(name);
+          }
+        }
+        if (tgt.isStage && !stageInfo) stageInfo = info;
+        infos.push(info);
+      }
+
+      let storeSeq = 0;
+      const nextStoreId = () => {
+        let id;
+        do {
+          storeSeq += 1;
+          id = encodeId(storeSeq);
+        } while (keptIds.has(id));
+        return id;
+      };
+
+      const assign = (info, reservedVars, reservedLists) => {
+        const gen = this._storeNameGenerators(reservedVars, reservedLists);
+        const varNames = new Map();
+        const listNames = new Map();
+        const finalVars = new Set(reservedVars);
+        const finalLists = new Set(reservedLists);
+        for (const e of info.vars) {
+          let name;
+          if (e.kept || !renameStores) name = e.name;
+          else name = gen.nextVarName(isStr(e.name) && e.name.startsWith(CLOUD_PREFIX));
+          varNames.set(e.id, name);
+          if (isStr(name)) finalVars.add(name);
+        }
+        for (const e of info.lists) {
+          const name = e.kept || !renameStores ? e.name : gen.nextListName();
+          listNames.set(e.id, name);
+          if (isStr(name)) finalLists.add(name);
+        }
+        info.plan = { varNames, listNames };
+        return { finalVars, finalLists };
+      };
+
+      let stageNames = { finalVars: keptVarNames, finalLists: keptListNames };
+      if (stageInfo) stageNames = assign(stageInfo, keptVarNames, keptListNames);
+      for (const info of infos) {
+        if (info === stageInfo) continue;
+        const resVars = new Set(stageNames.finalVars);
+        const resLists = new Set(stageNames.finalLists);
+        for (const e of info.vars) {
+          if (e.kept && isStr(e.name)) resVars.add(e.name);
+        }
+        for (const e of info.lists) {
+          if (e.kept && isStr(e.name)) resLists.add(e.name);
+        }
+        assign(info, resVars, resLists);
+      }
+
+      this.varByName = new Map();
+      this.listByName = new Map();
+      this.varByTarget = new Map();
+      this.listByTarget = new Map();
+      this.varMap = new Map();
+      this.listMap = new Map();
+      const order = stageInfo
+        ? [stageInfo, ...infos.filter((info) => info !== stageInfo)]
+        : infos;
+      for (const info of order) {
+        const tname = info.tname;
+        let varScope = null, listScope = null;
+        if (tname) {
+          if (!this.varByTarget.has(tname)) this.varByTarget.set(tname, new Map());
+          varScope = this.varByTarget.get(tname);
+          if (!this.listByTarget.has(tname)) this.listByTarget.set(tname, new Map());
+          listScope = this.listByTarget.get(tname);
+        }
+        for (const e of info.vars) {
+          const name = info.plan.varNames.get(e.id);
+          const mapping = e.kept ? [e.id, name] : [nextStoreId(), name];
+          this.varMap.set(e.id, mapping);
+          if (!this.varByName.has(e.name) || e.kept) this.varByName.set(e.name, mapping);
+          if (varScope && (!varScope.has(e.name) || e.kept)) varScope.set(e.name, mapping);
+        }
+        for (const e of info.lists) {
+          const name = info.plan.listNames.get(e.id);
+          const mapping = e.kept ? [e.id, name] : [nextStoreId(), name];
+          this.listMap.set(e.id, mapping);
+          if (!this.listByName.has(e.name) || e.kept) this.listByName.set(e.name, mapping);
+          if (listScope && (!listScope.has(e.name) || e.kept)) listScope.set(e.name, mapping);
+        }
+      }
     }
 
     // Broadcasts are numbered before `removeNoops` drops the messages nothing
@@ -594,73 +736,11 @@
     // is about to drop, so a survivor could inherit "Bb" merely because 50
     // dropped stores were numbered before it.  Once the drop set is known,
     // number the survivors again: kept monitor stores still keep their id and
-    // name, everything else is packed into the shortest free strings of its
-    // own target.  Only the rename maps change here; the store tables are
-    // rewritten later by `_renameStores`.
+    // name, everything else is packed into the shortest free strings.  Only
+    // the rename maps change here; the store tables are rewritten later by
+    // `_renameStores`.
     _compactStoreMappings(targets) {
-      const keepV = this.keptMonVarIds, keepL = this.keptMonListIds;
-      const dropV = this.droppedVarIds, dropL = this.droppedListIds;
-      const renameStores = this.options.renameStores;
-      this.varByName = new Map();
-      this.listByName = new Map();
-      this.varByTarget = new Map();
-      this.listByTarget = new Map();
-      for (const tgt of targets) {
-        if (!isDict(tgt)) continue;
-        const variables = isDict(tgt.variables) ? tgt.variables : {};
-        const lists = isDict(tgt.lists) ? tgt.lists : {};
-        const tname = isStr(tgt.name) ? tgt.name : null;
-        const varScope = tname ? new Map() : null;
-        const listScope = tname ? new Map() : null;
-        const reservedStoreIds = new Set();
-        const reservedVarNames = new Set();
-        const reservedListNames = new Set();
-        for (const [vid, ent] of Object.entries(variables)) {
-          if (dropV.has(vid) || !keepV.has(vid)) continue;
-          const name = isArr(ent) && ent.length ? ent[0] : String(ent);
-          reservedStoreIds.add(vid);
-          if (isStr(name)) reservedVarNames.add(name);
-        }
-        for (const [lid, ent] of Object.entries(lists)) {
-          if (dropL.has(lid) || !keepL.has(lid)) continue;
-          const name = isArr(ent) && ent.length ? ent[0] : String(ent);
-          reservedStoreIds.add(lid);
-          if (isStr(name)) reservedListNames.add(name);
-        }
-        const { nextStoreId, nextVarName, nextListName } =
-          this._storeGenerators(reservedStoreIds, reservedVarNames, reservedListNames);
-        for (const [vid, ent] of Object.entries(variables)) {
-          if (dropV.has(vid)) continue;
-          const name = isArr(ent) && ent.length ? ent[0] : String(ent);
-          let mapping;
-          if (keepV.has(vid)) {
-            mapping = [vid, name];
-          } else {
-            const cloud = isStr(name) && name.startsWith(CLOUD_PREFIX);
-            mapping = [nextStoreId(), renameStores ? nextVarName(cloud) : name];
-          }
-          this.varMap.set(vid, mapping);
-          if (!this.varByName.has(name) || keepV.has(vid)) this.varByName.set(name, mapping);
-          if (varScope && (!varScope.has(name) || keepV.has(vid))) varScope.set(name, mapping);
-        }
-        for (const [lid, ent] of Object.entries(lists)) {
-          if (dropL.has(lid)) continue;
-          const name = isArr(ent) && ent.length ? ent[0] : String(ent);
-          let mapping;
-          if (keepL.has(lid)) {
-            mapping = [lid, name];
-          } else {
-            mapping = [nextStoreId(), renameStores ? nextListName() : name];
-          }
-          this.listMap.set(lid, mapping);
-          if (!this.listByName.has(name) || keepL.has(lid)) this.listByName.set(name, mapping);
-          if (listScope && (!listScope.has(name) || keepL.has(lid))) listScope.set(name, mapping);
-        }
-        if (tname) {
-          this.varByTarget.set(tname, varScope);
-          this.listByTarget.set(tname, listScope);
-        }
-      }
+      this._planStoreMappings(targets, this.droppedVarIds, this.droppedListIds);
       let renamedV = 0, renamedL = 0;
       for (const [id, m] of this.varMap) {
         if (m[0] !== id || m[1] !== this.varOrigName.get(id)) renamedV += 1;
@@ -675,7 +755,6 @@
     _collect(targets) {
       let bcIdSeq = 0, bcNameSeq = 0;
       const total = Math.max(targets.length, 1);
-      const keepV = this.keptMonVarIds, keepL = this.keptMonListIds;
       // IDs and names are separate passes: shortenIds owns internal ids,
       // renameStores owns the names people can see.
       const renameStores = this.options.renameStores;
@@ -688,68 +767,20 @@
         if (tgt.isStage) this.stageName = tname;
         const variables = isDict(tgt.variables) ? tgt.variables : {};
         const lists = isDict(tgt.lists) ? tgt.lists : {};
-        // Kept stores keep their original id and name.  Ids only have to be
-        // unique inside one target (variables and lists share the VM's store
-        // namespace), so every target starts again at "A" instead of wasting
-        // letters on ids that only another sprite uses.  Names are reserved
-        // per kind: a variable and a list may share a name.
-        const reservedStoreIds = new Set();
-        const reservedVarNames = new Set();
-        const reservedListNames = new Set();
-        for (const [vid, ent] of Object.entries(variables)) {
-          if (!keepV.has(vid)) continue;
-          const name = isArr(ent) && ent.length ? ent[0] : String(ent);
-          reservedStoreIds.add(vid);
-          if (isStr(name)) reservedVarNames.add(name);
-        }
-        for (const [lid, ent] of Object.entries(lists)) {
-          if (!keepL.has(lid)) continue;
-          const name = isArr(ent) && ent.length ? ent[0] : String(ent);
-          reservedStoreIds.add(lid);
-          if (isStr(name)) reservedListNames.add(name);
-        }
-        const { nextStoreId, nextVarName, nextListName } =
-          this._storeGenerators(reservedStoreIds, reservedVarNames, reservedListNames);
-        let varScope = null, listScope = null;
-        if (isStr(tname)) {
-          if (!this.varByTarget.has(tname)) this.varByTarget.set(tname, new Map());
-          varScope = this.varByTarget.get(tname);
-          if (!this.listByTarget.has(tname)) this.listByTarget.set(tname, new Map());
-          listScope = this.listByTarget.get(tname);
-        }
+        // Original names are indexed before anything is renamed: block fields
+        // and monitors still point at them when the mappings are applied.
         for (const [vid, ent] of Object.entries(variables)) {
           const name = isArr(ent) && ent.length ? ent[0] : String(ent);
-          const cloud = isStr(name) && name.startsWith(CLOUD_PREFIX);
           this.varOrigName.set(vid, name);
-          if (cloud) this.varCloudIds.add(vid);
-          let mapping;
-          if (keepV.has(vid)) {
-            mapping = [vid, name];
-          } else {
-            const id = nextStoreId();
-            mapping = [id, renameStores ? nextVarName(cloud) : name];
-          }
-          this.varMap.set(vid, mapping);
-          if (!this.varByName.has(name) || keepV.has(vid)) this.varByName.set(name, mapping);
+          if (isStr(name) && name.startsWith(CLOUD_PREFIX)) this.varCloudIds.add(vid);
           if (!this.varNameIds.has(name)) this.varNameIds.set(name, new Set());
           this.varNameIds.get(name).add(vid);
-          if (varScope && (!varScope.has(name) || keepV.has(vid))) varScope.set(name, mapping);
         }
         for (const [lid, ent] of Object.entries(lists)) {
           const name = isArr(ent) && ent.length ? ent[0] : String(ent);
           this.listOrigName.set(lid, name);
-          let mapping;
-          if (keepL.has(lid)) {
-            mapping = [lid, name];
-          } else {
-            const id = nextStoreId();
-            mapping = [id, renameStores ? nextListName() : name];
-          }
-          this.listMap.set(lid, mapping);
-          if (!this.listByName.has(name) || keepL.has(lid)) this.listByName.set(name, mapping);
           if (!this.listNameIds.has(name)) this.listNameIds.set(name, new Set());
           this.listNameIds.get(name).add(lid);
-          if (listScope && (!listScope.has(name) || keepL.has(lid))) listScope.set(name, mapping);
         }
         const broadcasts = isDict(tgt.broadcasts) ? tgt.broadcasts : {};
         for (const [bid, ent] of Object.entries(broadcasts)) {
@@ -760,6 +791,7 @@
         }
         this.progress("collect", (idx + 1) / total, "Collecting variables, lists, and broadcasts...");
       }
+      this._planStoreMappings(targets, null, null);
       let renamedV = 0, renamedL = 0;
       for (const [id, m] of this.varMap) {
         if (m[0] !== id || m[1] !== this.varOrigName.get(id)) renamedV += 1;
@@ -1456,9 +1488,9 @@
         if (isDict(tgt.variables) && Object.keys(tgt.variables).length) {
           const out = {};
           for (const [k, ent] of Object.entries(tgt.variables)) {
+            if (dropV && this.droppedVarIds.has(k)) { st.vars_removed += 1; continue; }
             const m = this.varMap.get(k);
             if (!m) { out[k] = ent; continue; }
-            if (dropV && !this.usedVarIds.has(k)) { st.vars_removed += 1; continue; }
             out[m[0]] = [m[1], ...ent.slice(1)];
           }
           tgt.variables = out;
@@ -1466,9 +1498,9 @@
         if (isDict(tgt.lists) && Object.keys(tgt.lists).length) {
           const out = {};
           for (const [k, ent] of Object.entries(tgt.lists)) {
+            if (dropV && this.droppedListIds.has(k)) { st.lists_removed += 1; continue; }
             const m = this.listMap.get(k);
             if (!m) { out[k] = ent; continue; }
-            if (dropV && !this.usedListIds.has(k)) { st.lists_removed += 1; continue; }
             out[m[0]] = [m[1], ...ent.slice(1)];
           }
           tgt.lists = out;
@@ -2445,13 +2477,17 @@
     _reuseReporters(targets) {
       const varsByTarget = new Map();
       const listsByTarget = new Map();
+      const storeIds = new Set();
+      let stage = null;
 
       for (const tgt of targets) {
         if (!isDict(tgt)) continue;
+        if (tgt.isStage) stage = tgt;
         const vmap = new Map();
         const lmap = new Map();
         const variables = isDict(tgt.variables) ? tgt.variables : {};
         for (const [id, ent] of Object.entries(variables)) {
+          storeIds.add(id);
           const name = isArr(ent) ? ent[0] : ent;
           if (!isStr(name)) continue;
           if (!vmap.has(name)) vmap.set(name, new Set());
@@ -2459,6 +2495,7 @@
         }
         const lists = isDict(tgt.lists) ? tgt.lists : {};
         for (const [id, ent] of Object.entries(lists)) {
+          storeIds.add(id);
           const name = isArr(ent) ? ent[0] : ent;
           if (!isStr(name)) continue;
           if (!lmap.has(name)) lmap.set(name, new Set());
@@ -2470,7 +2507,7 @@
         }
       }
 
-      const ctx = { varsByTarget, listsByTarget };
+      const ctx = { varsByTarget, listsByTarget, storeIds, targets, stage };
       for (const tgt of targets) {
         if (!isDict(tgt) || !isDict(tgt.blocks)) continue;
         if (!Object.keys(tgt.blocks).length) continue;
@@ -2493,6 +2530,7 @@
       for (const temp of created) {
         if (temp.uses) continue;
         if (isDict(tgt.variables) && has(tgt.variables, temp.id)) delete tgt.variables[temp.id];
+        ctx.storeIds.delete(temp.id);
       }
       if (!hadVars && isDict(tgt.variables) && !Object.keys(tgt.variables).length) {
         delete tgt.variables;
@@ -2506,6 +2544,7 @@
         else delete tgt.variables;
         if (snapshotComments === undefined) delete tgt.comments;
         else tgt.comments = snapshotComments;
+        for (const temp of created) ctx.storeIds.delete(temp.id);
         return;
       }
       this.stats.reporter_values_cached += applied.groups;
@@ -2575,26 +2614,33 @@
     }
 
     _newTempVar(tgt, ctx, script) {
-      // A temporary is an ordinary store of this target, so its id only has to
-      // be free among the target's own stores and its name only has to avoid
-      // the variable names a script of this target can see (its own and the
-      // stage's).  A project-wide counter made both needlessly long.
-      const vars = isDict(tgt.variables) ? tgt.variables : {};
-      const lists = isDict(tgt.lists) ? tgt.lists : {};
-      const usedIds = new Set([...Object.keys(vars), ...Object.keys(lists)]);
+      // The id is numbered across the whole project, not just this target: a
+      // sprite resolves an id in its own map first and then in the stage's, so
+      // reusing a stage id here would make the sprite's global reads resolve
+      // to the temporary.  A sprite-local name only has to avoid the names its
+      // scripts can see (its own and the stage's); a stage name additionally
+      // has to avoid every sprite's name, or the editor reports a global/local
+      // clash.
+      const isStage = !!tgt.isStage || tgt === ctx.stage;
       const usedNames = new Set();
-      for (const ent of Object.values(vars)) {
-        const n = isArr(ent) ? ent[0] : ent;
-        if (isStr(n)) usedNames.add(n);
-      }
-      if (tgt.name !== this.stageName && isStr(this.stageName)) {
-        const stageVars = ctx.varsByTarget.get(this.stageName);
-        if (stageVars) for (const n of stageVars.keys()) usedNames.add(n);
+      const addNames = (target) => {
+        if (!isDict(target)) return;
+        for (const ent of Object.values(isDict(target.variables) ? target.variables : {})) {
+          const n = isArr(ent) ? ent[0] : ent;
+          if (isStr(n)) usedNames.add(n);
+        }
+      };
+      if (isStage) {
+        for (const target of ctx.targets) addNames(target);
+      } else {
+        addNames(tgt);
+        addNames(ctx.stage);
       }
       const name = shortestFreeId(usedNames);
-      const id = shortestFreeId(usedIds);
+      const id = shortestFreeId(ctx.storeIds);
       if (!isDict(tgt.variables)) tgt.variables = {};
       tgt.variables[id] = [name, 0];
+      ctx.storeIds.add(id);
       return { id, name, script, lastStmt: null, uses: 0 };
     }
 
