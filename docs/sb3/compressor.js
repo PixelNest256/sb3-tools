@@ -288,7 +288,9 @@
     compactWorkspace: false,
     removeDeadAssets: false,
     removeWriteOnly: false,
-    normalizeTypes: false
+    normalizeTypes: false,
+    stripNullFieldIds: true,
+    zeroTopLevelCoords: false
   };
 
   class Options {
@@ -418,6 +420,14 @@
       if (o.normalizeTypes) {
         this.progress("collect", 1.0, "Normalizing types and representations...");
         this._normalizeTypes(project);
+      if (o.stripNullFieldIds) {
+        this.progress("collect", 1.0, "Stripping null field IDs...");
+        this._stripNullFieldIds(project.targets);
+      }
+      if (o.zeroTopLevelCoords) {
+        this.progress("collect", 1.0, "Zeroing top-level coordinates...");
+        this._zeroTopLevelCoords(project);
+      }
       }
       if (o.shortenIds) {
         if (o.removeUnused) {
@@ -5341,6 +5351,47 @@
       }
     }
     // Proposal 4: Normalize types and representations
+    _stripNullFieldIds(targets) {
+      if (!isArr(targets)) return;
+      for (const tgt of targets) {
+        if (!isDict(tgt)) continue;
+        const blocks = isDict(tgt.blocks) ? tgt.blocks : {};
+        for (const blk of Object.values(blocks)) {
+          if (!isDict(blk) || !isDict(blk.fields)) continue;
+          for (const key of Object.keys(blk.fields)) {
+            const f = blk.fields[key];
+            if (Array.isArray(f) && f.length === 2 && f[1] === null) {
+              blk.fields[key] = [f[0]];
+            }
+          }
+        }
+      }
+    }
+
+    _zeroTopLevelCoords(project) {
+      if (!isDict(project) || !isArr(project.targets)) return;
+      for (const tgt of project.targets) {
+        if (!isDict(tgt)) continue;
+        const blocks = isDict(tgt.blocks) ? tgt.blocks : {};
+        for (const blk of Object.values(blocks)) {
+          if (!isDict(blk)) continue;
+          if (blk.topLevel === true) {
+            blk.x = 0;
+            blk.y = 0;
+          }
+        }
+        const comments = tgt.comments;
+        if (isDict(comments)) {
+          for (const c of Object.values(comments)) {
+            if (!isDict(c)) continue;
+            c.x = 0;
+            c.y = 0;
+          }
+        }
+      }
+    }
+
+
     _normalizeTypes(project) {
       const st = this.stats;
 

@@ -247,7 +247,9 @@
     compactWorkspace: false,
     removeDeadAssets: false,
     removeWriteOnly: false,
-    normalizeTypes: false
+    normalizeTypes: false,
+    stripNullFieldIds: true,
+    zeroTopLevelCoords: false
   };
 
   // Presets are cumulative: each stage keeps everything the previous one had
@@ -269,7 +271,8 @@
       ]],
       ["max", [
         "stripComments", "compactWorkspace", "removeMonitors",
-        "removeDeadAssets", "removeWriteOnly", "normalizeTypes"
+        "removeDeadAssets", "removeWriteOnly", "normalizeTypes",
+        "zeroTopLevelCoords"
       ]]
     ];
     var keys = [];

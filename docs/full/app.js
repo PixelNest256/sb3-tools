@@ -230,7 +230,8 @@
     "loopDuplicates", "inlineSingleCall", "removeNoops", "simplifyIfElse",
     "reuseReporters",
     "compressProcs", "freqIds", "foldConstants", "propagateConstants",
-    "removeDeadAssets", "removeWriteOnly", "normalizeTypes"
+    "removeDeadAssets", "removeWriteOnly", "normalizeTypes",
+    "stripNullFieldIds", "zeroTopLevelCoords", "stripComments"
   ];
   var PROJECT_KEY = "sb3-full-project-v1";
   var MEDIA_KEY = "sb3-full-media-v1";
@@ -356,6 +357,8 @@
     out.removeDeadAssets = false;
     out.removeWriteOnly = false;
     out.normalizeTypes = false;
+    out.zeroTopLevelCoords = false;
+    out.stripComments = false;
     return out;
   }
 
