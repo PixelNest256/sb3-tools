@@ -229,7 +229,8 @@
     "dropObscuredShadows", "removeUnreachable", "extractDuplicates", "nearDuplicates",
     "loopDuplicates", "inlineSingleCall", "removeNoops", "simplifyIfElse",
     "reuseReporters",
-    "compressProcs", "freqIds", "foldConstants", "propagateConstants"
+    "compressProcs", "freqIds", "foldConstants", "propagateConstants",
+    "removeDeadAssets", "removeWriteOnly", "normalizeTypes"
   ];
   var PROJECT_KEY = "sb3-full-project-v1";
   var MEDIA_KEY = "sb3-full-media-v1";
@@ -352,6 +353,9 @@
     // The full page has no presets: dropping hidden monitors stays opt-in,
     // matching the non-maximum presets on /sb3/.
     out.removeMonitors = false;
+    out.removeDeadAssets = false;
+    out.removeWriteOnly = false;
+    out.normalizeTypes = false;
     return out;
   }
 

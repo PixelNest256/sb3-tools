@@ -1,4 +1,4 @@
-/* SB3 Compressor — browser edition.
+﻿/* SB3 Compressor 窶・browser edition.
  * A behavior-preserving compressor for Scratch / TurboWarp .sb3 files.
  * Everything runs in the tab; it never uploads a project.
  */
@@ -572,10 +572,10 @@
     }
 
     // ------------------------------------------------------------------
-    // Shortest-free-string allocators.  The "☁ " marker on cloud variables is
+    // Shortest-free-string allocators.  The "笘・" marker on cloud variables is
     // required by Scratch, so it is added around the short name rather than
     // being counted as part of it.  Cloud and ordinary names therefore have
-    // their own counters: a cloud variable may take "☁ A" while an ordinary
+    // their own counters: a cloud variable may take "笘・A" while an ordinary
     // one also takes "A", because the marker alone keeps the two names
     // distinct.
     _storeNameGenerators(reservedVarNames, reservedListNames) {
@@ -5109,8 +5109,12 @@
       const showL = new Set();
       const standaloneV = new Set();
       const standaloneL = new Set();
+      const removedV = new Set();
+      const removedL = new Set();
+      const removedNamesV = new Set();
+      const removedNamesL = new Set();
 
-      const VAR_WRITE_OPS = new Set(["data_setvariableto", "data_changevariableby", "control_for_each"]);
+      const VAR_WRITE_OPS = new Set(["data_setvariableto", "data_changevariableby"]);
       const VAR_READ_OPS = new Set(["data_variable"]);
       const LIST_WRITE_OPS = new Set(["data_addtolist", "data_deleteoflist", "data_deletealloflist",
         "data_insertatlist", "data_replaceitemoflist"]);
@@ -5160,7 +5164,28 @@
             }
           }
 
-          // Top-level reporters
+          // Store-primitive references in inputs (variable/list)
+          if (isDict(blk.inputs)) {
+            for (const v of Object.values(blk.inputs)) {
+              if (!Array.isArray(v)) continue;
+              for (let i = 1; i < v.length; i++) {
+                const prim = v[i];
+                if (!Array.isArray(prim) || prim.length < 3) continue;
+                if (prim[0] !== 12 && prim[0] !== 13) continue;
+                const sid = prim[2];
+                if (!isStr(sid)) continue;
+                // Determine whether it's a variable or list by ownership
+                let isVar = false, isList = false;
+                for (const t2 of targets) {
+                  if (!isDict(t2)) continue;
+                  if (isDict(t2.variables) && Object.prototype.hasOwnProperty.call(t2.variables, sid)) isVar = true;
+                  if (isDict(t2.lists) && Object.prototype.hasOwnProperty.call(t2.lists, sid)) isList = true;
+                }
+                if (isVar) readV.add(sid);
+                if (isList) readL.add(sid);
+              }
+            }
+          }
           if (blk.topLevel === true) {
             if (op === "data_variable") {
               const fv = fields.VARIABLE;
@@ -5180,11 +5205,21 @@
         const params = mon.params || {};
 
         if (op === "data_variable") {
-          const mid = mon.id;
-          if (isStr(mid)) showV.add(mid);
+          const mname = params.VARIABLE;
+          for (const tgt of targets) {
+            if (!isDict(tgt) || !isDict(tgt.variables)) continue;
+            for (const [vid, ent] of Object.entries(tgt.variables)) {
+              if (isArr(ent) && ent[0] === mname) showV.add(vid);
+            }
+          }
         } else if (op === "data_listcontents") {
-          const mid = mon.id;
-          if (isStr(mid)) showL.add(mid);
+          const mname = params.LIST;
+          for (const tgt of targets) {
+            if (!isDict(tgt) || !isDict(tgt.lists)) continue;
+            for (const [lid, ent] of Object.entries(tgt.lists)) {
+              if (isArr(ent) && ent[0] === mname) showL.add(lid);
+            }
+          }
         }
       }
 
@@ -5202,6 +5237,8 @@
 
             delete tgt.variables[id];
             st.writeonly_vars_removed += 1;
+            removedV.add(id);
+            removedNamesV.add(name);
           }
         }
 
@@ -5213,12 +5250,96 @@
 
             delete tgt.lists[id];
             st.writeonly_lists_removed += 1;
+            removedL.add(id);
+            removedNamesL.add(isArr(ent) && ent.length ? ent[0] : String(ent));
+          }
+    // Remove blocks that reference removed variables/lists, and fix links
+    for (const tgt of targets) {
+      if (!isDict(tgt)) continue;
+      const blocks = isDict(tgt.blocks) ? tgt.blocks : {};
+      const removedBlocks = {};
+      const removedIds = new Set();
+      for (const [bid, blk] of Object.entries(blocks)) {
+        if (!isDict(blk)) continue;
+        const fv = blk.fields && blk.fields.VARIABLE;
+        const fl = blk.fields && blk.fields.LIST;
+        const vid = fv && isArr(fv) && isStr(fv[1]) ? fv[1] : null;
+        const lid = fl && isArr(fl) && isStr(fl[1]) ? fl[1] : null;
+        let isRemoved = (vid && removedV.has(vid)) || (lid && removedL.has(lid));
+        // Store-primitive references in inputs
+        if (!isRemoved && isDict(blk.inputs)) {
+          for (const v of Object.values(blk.inputs)) {
+            if (!Array.isArray(v)) continue;
+            for (let i = 1; i < v.length; i++) {
+              const prim = v[i];
+              if (!Array.isArray(prim) || prim.length < 3) continue;
+              if (prim[0] !== 12 && prim[0] !== 13) continue;
+              const sid = prim[2];
+              if (isStr(sid) && (removedV.has(sid) || removedL.has(sid))) { isRemoved = true; break; }
+            }
+            if (isRemoved) break;
+          }
+        }
+        if (isRemoved) {
+          removedBlocks[bid] = blk;
+          removedIds.add(bid);
+        }
+      }
+      const kept = {};
+      for (const [bid, blk] of Object.entries(blocks)) {
+        if (removedIds.has(bid)) continue;
+        kept[bid] = blk;
+      }
+      // Splice chains and inputs that pointed at removed blocks
+      for (const blk of Object.values(kept)) {
+        if (!isDict(blk)) continue;
+        if (isStr(blk.next) && removedIds.has(blk.next)) {
+          blk.next = removedBlocks[blk.next] && isStr(removedBlocks[blk.next].next)
+            ? removedBlocks[blk.next].next : null;
+        } else if (isStr(blk.next) && !Object.prototype.hasOwnProperty.call(kept, blk.next)) {
+          blk.next = null;
+        }
+        if (isStr(blk.parent) && removedIds.has(blk.parent)) {
+          blk.parent = removedBlocks[blk.parent] && isStr(removedBlocks[blk.parent].parent)
+            ? removedBlocks[blk.parent].parent : null;
+        } else if (isStr(blk.parent) && !Object.prototype.hasOwnProperty.call(kept, blk.parent)) {
+          blk.parent = null;
+        }
+        if (isDict(blk.inputs)) {
+          for (const k of Object.keys(blk.inputs)) {
+            const v = blk.inputs[k];
+            if (Array.isArray(v) && v.length >= 2 && isStr(v[1]) && removedIds.has(v[1])) {
+              const nb = removedBlocks[v[1]];
+              v[1] = (nb && isStr(nb.next)) ? nb.next : null;
+            }
           }
         }
       }
+      tgt.blocks = kept;
     }
 
-    // ------------------------------------------------------------------
+    // Remove monitors for removed variables/lists
+    if (isArr(monitors)) {
+      const keptMons = [];
+      for (const mon of monitors) {
+        if (!isDict(mon)) { keptMons.push(mon); continue; }
+        const params = mon.params || {};
+        const op = mon.opcode;
+        let mname = null;
+        if (op === "data_variable") mname = params.VARIABLE;
+        else if (op === "data_listcontents") mname = params.LIST;
+        if (mname !== null && mname !== undefined) {
+          if (op === "data_variable" && removedNamesV.has(mname)) continue;
+          if (op === "data_listcontents" && removedNamesL.has(mname)) continue;
+        }
+        keptMons.push(mon);
+      }
+      monitors.length = 0;
+      for (const m of keptMons) monitors.push(m);
+    }
+        }
+      }
+    }
     // Proposal 4: Normalize types and representations
     _normalizeTypes(project) {
       const st = this.stats;

@@ -244,7 +244,10 @@
     propagateConstants: true,
     reuseReporters: true,
     stripComments: false,
-    compactWorkspace: false
+    compactWorkspace: false,
+    removeDeadAssets: false,
+    removeWriteOnly: false,
+    normalizeTypes: false
   };
 
   // Presets are cumulative: each stage keeps everything the previous one had
@@ -265,7 +268,8 @@
         "extractDuplicates", "nearDuplicates", "loopDuplicates", "reuseReporters"
       ]],
       ["max", [
-        "stripComments", "compactWorkspace", "removeMonitors"
+        "stripComments", "compactWorkspace", "removeMonitors",
+        "removeDeadAssets", "removeWriteOnly", "normalizeTypes"
       ]]
     ];
     var keys = [];
@@ -304,7 +308,10 @@
     "lists_removed",
     "procs_renamed",
     "const_values_folded",
-    "procs_inlined"
+    "procs_inlined",
+    "dead_costumes_removed", "dead_sounds_removed", "dead_sprites_removed",
+    "writeonly_vars_removed", "writeonly_lists_removed",
+    "md5ext_removed", "numeric_strings_normalized", "meta_agent_cleared"
   ];
 
   var STORAGE_KEY = "sb3-compressor-options-v1";
