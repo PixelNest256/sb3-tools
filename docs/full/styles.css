@@ -624,12 +624,13 @@ h1 {
 .opt input[type="checkbox"]:focus-visible { outline: 2px solid var(--signal); outline-offset: 2px; }
 
 .opt-number {
-  grid-template-columns: minmax(0, 1fr) 58px;
+  grid-template-columns: minmax(0, 1fr) 40px;
+  column-gap: 8px;
   align-items: center;
 }
 .opt-number input[type="number"] {
-  width: 58px;
-  padding: 3px 4px;
+  width: 40px;
+  padding: 2px 3px;
   border: 1px solid var(--rule-light);
   background: transparent;
   color: var(--ink);
