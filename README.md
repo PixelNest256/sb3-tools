@@ -35,8 +35,11 @@ Each tool has an English page and a Japanese page (`…/ja/`). Use `docs/sb3/`,
   variables and lists, unreachable blocks/comments, uncalled definitions, and
   dead broadcasts.
 - **Restructure** repeated or near-duplicate code into shared custom blocks,
-  consecutive repeats into `repeat` loops, empty `if-else` into `if`, and
-  single-use non-warp definitions inline.
+  consecutive repeats into `repeat` loops, empty `if-else` into `if`, identical
+  reporters within one script into temporary variables, and single-use non-warp
+  definitions inline. Reporters that read the clock, the date, the keyboard, the
+  mouse, or another sprite are only cached inside a "run without screen refresh"
+  definition.
 - **Fold** constant arithmetic and propagate stores that never change.
 - **Minify** the JSON and repack the zip.
 

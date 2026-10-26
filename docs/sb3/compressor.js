@@ -47,6 +47,30 @@
   const SENSING_SPRITE_PROPERTIES = new Set(["x position", "y position", "direction",
     "costume #", "costume name", "size", "volume"]);
 
+  const REUSE_REPORTER_OPS = new Set([
+    "operator_add", "operator_subtract", "operator_multiply", "operator_divide",
+    "operator_lt", "operator_equals", "operator_gt", "operator_and", "operator_or",
+    "operator_not", "operator_join", "operator_letter_of", "operator_length",
+    "operator_contains", "operator_mod", "operator_round", "operator_mathop",
+    "data_variable", "data_listcontents", "data_itemoflist", "data_itemnumoflist",
+    "data_lengthoflist", "data_listcontainsitem",
+    "argument_reporter_string_number", "argument_reporter_boolean",
+    "motion_xposition", "motion_yposition", "motion_direction",
+    "looks_size", "looks_costumenumbername", "looks_backdropnumbername",
+    "sound_volume",
+    "sensing_timer", "sensing_current", "sensing_dayssince2000",
+    "sensing_keypressed", "sensing_mousedown", "sensing_mousex", "sensing_mousey",
+    "sensing_touchingobject", "sensing_touchingcolor", "sensing_coloristouchingcolor",
+    "sensing_distanceto", "sensing_answer", "sensing_loudness", "sensing_of",
+    "sensing_username", "sensing_online"
+  ]);
+  const REUSE_PURE_REPORTER_OPS = REUSE_REPORTER_OPS;
+  const REUSE_YIELD_OPS = new Set([
+    "control_wait", "control_wait_until", "event_broadcastandwait",
+    "sensing_askandwait", "motion_glidesecstoxy", "motion_glideto",
+    "looks_sayforsecs", "looks_thinkforsecs", "sound_playuntildone"
+  ]);
+
   const TARGET_DEFAULTS = [
     ["volume", 100], ["currentCostume", 0], ["tempo", 60],
     ["videoTransparency", 50], ["videoState", "on"], ["textToSpeechLanguage", null],
@@ -217,6 +241,7 @@
     foldConstants: true,
     loopDuplicates: true,
     propagateConstants: true,
+    reuseReporters: true,
     stripComments: false,
     compactWorkspace: false
   };
@@ -249,6 +274,7 @@
         near_duplicates_extracted: 0, near_blocks_saved: 0,
         ifelse_converted: 0, noop_procs_removed: 0, noop_calls_removed: 0,
         noop_receivers_removed: 0, noop_broadcasts_removed: 0,
+        reporter_values_cached: 0, reporter_uses_reused: 0, temp_vars_created: 0,
         noop_messages_removed: 0, procs_inlined: 0, const_values_folded: 0,
         loops_created: 0, loop_blocks_saved: 0,
         const_vars_inlined: 0, const_reads_inlined: 0,
@@ -341,6 +367,10 @@
         this.progress("targets", i / n, `Processing target ${i + 1}/${n}`);
         this._processTarget(targets[i]);
         this.progress("targets", (i + 1) / n, `Processing target ${i + 1}/${n}`);
+      }
+      if (o.reuseReporters) {
+        this.progress("targets", 1.0, "Reusing repeated reporter values...");
+        this._reuseReporters(targets);
       }
       if (this.cancelled()) throw new Error("Cancelled");
       this.progress("finalize", 0.5, "Processing monitors and metadata...");
@@ -2162,6 +2192,710 @@
     }
 
     // ------------------------------------------------------------------
+    // ------------------------------------------------------------------
+    // Reuse repeated reporter values through temporary variables.
+    //
+    // A reporter is only cached inside one `next` chain.  That keeps the
+    // transformation local: the assignment sits immediately before the
+    // statement that holds the first copy, and every other copy in the same
+    // chain is dominated by it.  The gap between two copies is then checked
+    // for writes to the values the reporter reads, for screen-refresh points,
+    // and for blocks whose effects cannot be modelled.  Reporters that read
+    // the clock, the date, the keyboard, the mouse, or another sprite are
+    // only considered inside a warp ("run without screen refresh") definition.
+    //
+    // This runs after every target has been rewritten, so the before/after
+    // size check below sees the final block and variable shapes.
+    // ------------------------------------------------------------------
+    _reuseReporters(targets) {
+      const usedNames = new Set();
+      const usedIds = new Set();
+      const varsByTarget = new Map();
+      const listsByTarget = new Map();
+
+      for (const tgt of targets) {
+        if (!isDict(tgt)) continue;
+        const vmap = new Map();
+        const lmap = new Map();
+        const variables = isDict(tgt.variables) ? tgt.variables : {};
+        for (const [id, ent] of Object.entries(variables)) {
+          usedIds.add(id);
+          const name = isArr(ent) ? ent[0] : ent;
+          if (!isStr(name)) continue;
+          usedNames.add(name);
+          if (!vmap.has(name)) vmap.set(name, new Set());
+          vmap.get(name).add(id);
+        }
+        const lists = isDict(tgt.lists) ? tgt.lists : {};
+        for (const [id, ent] of Object.entries(lists)) {
+          usedIds.add(id);
+          const name = isArr(ent) ? ent[0] : ent;
+          if (!isStr(name)) continue;
+          usedNames.add(name);
+          if (!lmap.has(name)) lmap.set(name, new Set());
+          lmap.get(name).add(id);
+        }
+        for (const id of Object.keys(isDict(tgt.blocks) ? tgt.blocks : {})) usedIds.add(id);
+        for (const id of Object.keys(isDict(tgt.broadcasts) ? tgt.broadcasts : {})) usedIds.add(id);
+        if (isStr(tgt.name)) {
+          varsByTarget.set(tgt.name, vmap);
+          listsByTarget.set(tgt.name, lmap);
+        }
+      }
+
+      const ctx = {
+        usedNames, usedIds, varsByTarget, listsByTarget,
+        suffix: 0, blockSeq: 0
+      };
+      for (const tgt of targets) {
+        if (!isDict(tgt) || !isDict(tgt.blocks)) continue;
+        if (!Object.keys(tgt.blocks).length) continue;
+        if (this.cancelled()) throw new Error("Cancelled");
+        this._reuseReportersInTarget(tgt, ctx);
+      }
+    }
+
+    _reuseReportersInTarget(tgt, ctx) {
+      const blocks = tgt.blocks;
+      if (!isDict(blocks) || Object.keys(blocks).length < 2) return;
+      const before = jlen({ blocks, variables: tgt.variables || {} });
+      const hadVars = has(tgt, "variables");
+      const snapshotBlocks = deepCopy(blocks);
+      const snapshotVars = deepCopy(isDict(tgt.variables) ? tgt.variables : {});
+      const snapshotComments = deepCopy(tgt.comments);
+      const created = [];
+      const pool = [];
+      const applied = this._applyReporterReuse(blocks, tgt, ctx, created, pool);
+      for (const temp of created) {
+        if (temp.uses) continue;
+        if (isDict(tgt.variables) && has(tgt.variables, temp.id)) delete tgt.variables[temp.id];
+        ctx.usedNames.delete(temp.name);
+        ctx.usedIds.delete(temp.id);
+      }
+      if (!hadVars && isDict(tgt.variables) && !Object.keys(tgt.variables).length) {
+        delete tgt.variables;
+      }
+      if (!applied) return;
+      this._dropDetachedComments(tgt);
+      const after = jlen({ blocks, variables: tgt.variables || {} });
+      if (after >= before) {
+        tgt.blocks = snapshotBlocks;
+        if (hadVars) tgt.variables = snapshotVars;
+        else delete tgt.variables;
+        if (snapshotComments === undefined) delete tgt.comments;
+        else tgt.comments = snapshotComments;
+        for (const temp of created) {
+          ctx.usedNames.delete(temp.name);
+          ctx.usedIds.delete(temp.id);
+        }
+        return;
+      }
+      this.stats.reporter_values_cached += applied.groups;
+      this.stats.reporter_uses_reused += applied.uses;
+      this.stats.temp_vars_created += created.length;
+    }
+
+    _dropDetachedComments(tgt) {
+      if (!isDict(tgt.comments) || !isDict(tgt.blocks)) return;
+      for (const [id, com] of Object.entries(tgt.comments)) {
+        if (!isDict(com)) continue;
+        const anchor = com.blockId;
+        if (isStr(anchor) && !has(tgt.blocks, anchor)) delete tgt.comments[id];
+      }
+    }
+
+    _applyReporterReuse(blocks, tgt, ctx, created, pool) {
+      let groups = 0, uses = 0;
+      for (let pass = 0; pass < 30; pass++) {
+        if (this.cancelled()) throw new Error("Cancelled");
+        const cands = this._reporterReuseCandidates(blocks, tgt, ctx);
+        if (!cands.length) break;
+        cands.sort((a, b) => (b.net - a.net) || (a.startOrder - b.startOrder));
+        const group = cands[0];
+        if (!this._reporterGroupStillValid(blocks, group)) break;
+        const temp = this._tempVarForRange(tgt, ctx, pool, group, created);
+        const info = this._applyReporterReuseGroup(blocks, group, temp, ctx);
+        if (!info) break;
+        temp.uses += 1;
+        temp.lastStmt = group.lastStmt;
+        groups += 1;
+        uses += info.uses;
+      }
+      return groups ? { groups, uses } : null;
+    }
+
+    _reporterGroupStillValid(blocks, group) {
+      if (!group || !isArr(group.occs) || !group.occs.length) return false;
+      for (const occ of group.occs) {
+        if (!isStr(occ.blockId) || !has(blocks, occ.blockId)) return false;
+        if (!isArr(occ.entry) || occ.entry[occ.itemIndex] !== occ.blockId) return false;
+        const stmt = group.chain.ids[occ.index];
+        if (!isStr(stmt) || !has(blocks, stmt)) return false;
+      }
+      return true;
+    }
+
+    _tempVarForRange(tgt, ctx, pool, group, created) {
+      let best = null;
+      let bestOrder = -1;
+      for (const temp of pool) {
+        if (temp.script !== group.script) continue;
+        if (!isStr(temp.lastStmt)) continue;
+        const last = group.order.get(temp.lastStmt);
+        const start = group.order.get(group.firstStmt);
+        if (last === undefined || start === undefined) continue;
+        if (last < start && last > bestOrder) {
+          best = temp;
+          bestOrder = last;
+        }
+      }
+      if (best) return best;
+      const temp = this._newTempVar(tgt, ctx, group.script);
+      pool.push(temp);
+      created.push(temp);
+      return temp;
+    }
+
+    _newTempVar(tgt, ctx, script) {
+      const renamed = !!this.options.renameStores;
+      let name, id;
+      do {
+        ctx.suffix += 1;
+        name = renamed
+          ? "V" + encodeId(1000000 + ctx.suffix)
+          : "t" + ctx.suffix;
+        id = "W" + encodeId(1000000 + ctx.suffix);
+      } while (ctx.usedNames.has(name) || ctx.usedIds.has(id));
+      if (!isDict(tgt.variables)) tgt.variables = {};
+      tgt.variables[id] = [name, 0];
+      ctx.usedNames.add(name);
+      ctx.usedIds.add(id);
+      return { id, name, script, lastStmt: null, uses: 0 };
+    }
+
+    _newReuseBlockId(blocks, ctx) {
+      let id;
+      do {
+        ctx.blockSeq += 1;
+        id = "c" + encodeId(ctx.blockSeq);
+      } while (has(blocks, id) || ctx.usedIds.has(id));
+      ctx.usedIds.add(id);
+      return id;
+    }
+
+    _reporterReuseCandidates(blocks, tgt, ctx) {
+      const chains = this._reporterChains(blocks);
+      if (!chains.length) return [];
+      const orderInfo = this._reporterScriptOrder(blocks);
+      const order = orderInfo.order;
+      const canonCache = new Map();
+      const memo = new Map();
+      const out = [];
+
+      for (const chain of chains) {
+        const script = orderInfo.scriptOf.get(chain.head);
+        if (!script) continue;
+        const occs = [];
+        for (let i = 0; i < chain.ids.length; i++) {
+          const stmtId = chain.ids[i];
+          const stmt = blocks[stmtId];
+          if (!isDict(stmt)) continue;
+          if (this._isHatOpcode(stmt.opcode)) continue;
+          if (stmt.topLevel === true && !isStr(stmt.next)) continue;
+          if (this._reporterStatementUnsafe(blocks, stmtId)) continue;
+          this._collectReporterOccurrences(blocks, stmtId, i, occs, canonCache, memo, ctx);
+        }
+        if (occs.length < 2) continue;
+
+        const groups = new Map();
+        for (const occ of occs) {
+          if (!groups.has(occ.sig)) groups.set(occ.sig, []);
+          groups.get(occ.sig).push(occ);
+        }
+        for (const list of groups.values()) {
+          if (list.length < 2) continue;
+          list.sort((a, b) => (a.index - b.index) || (a.order - b.order));
+          let run = [list[0]];
+          const flush = () => {
+            if (run.length < 2) return;
+            const info = this._reporterCandidateInfo(chain, script, run, order);
+            if (info) out.push(info);
+          };
+          for (let i = 1; i < list.length; i++) {
+            if (this._reporterGapClean(blocks, chain, run[run.length - 1], list[i])) {
+              run.push(list[i]);
+            } else {
+              flush();
+              run = [list[i]];
+            }
+          }
+          flush();
+        }
+      }
+      return out;
+    }
+
+    _reporterChains(blocks) {
+      const nextTargets = new Set();
+      for (const blk of Object.values(blocks)) {
+        if (isDict(blk) && isStr(blk.next) && has(blocks, blk.next)) nextTargets.add(blk.next);
+      }
+      const chains = [];
+      for (const bid of Object.keys(blocks)) {
+        if (!isDict(blocks[bid]) || nextTargets.has(bid)) continue;
+        const ids = this._chainIds(blocks, bid, 1000000);
+        if (ids.length) chains.push({ head: bid, ids });
+      }
+      return chains;
+    }
+
+    _reporterScriptOrder(blocks) {
+      const order = new Map();
+      const scriptOf = new Map();
+      const visited = new Set();
+      let n = 0;
+      const visitChain = (start, script) => {
+        for (const bid of this._chainIds(blocks, start, 1000000)) {
+          if (visited.has(bid)) return;
+          visited.add(bid);
+          order.set(bid, n);
+          scriptOf.set(bid, script);
+          n += 1;
+          const blk = blocks[bid];
+          if (!isDict(blk) || !isDict(blk.inputs)) continue;
+          for (const key of ["SUBSTACK", "SUBSTACK2"]) {
+            const value = blk.inputs[key];
+            if (isArr(value) && isStr(value[1]) && has(blocks, value[1])) {
+              visitChain(value[1], script);
+            }
+          }
+        }
+      };
+      for (const bid of Object.keys(blocks)) {
+        const blk = blocks[bid];
+        if (!isDict(blk)) continue;
+        if (blk.topLevel === true || blk.parent === null) {
+          if (visited.has(bid)) continue;
+          visitChain(bid, bid);
+        }
+      }
+      for (const bid of Object.keys(blocks)) {
+        if (!isDict(blocks[bid]) || visited.has(bid)) continue;
+        visitChain(bid, bid);
+      }
+      return { order, scriptOf };
+    }
+
+    _reporterStatementUnsafe(blocks, stmtId) {
+      const stmt = blocks[stmtId];
+      if (!isDict(stmt) || this._isHatOpcode(stmt.opcode)) return true;
+      let unsafe = false;
+      const seen = new Set();
+      const visit = (bid) => {
+        if (unsafe || !isStr(bid) || seen.has(bid) || !has(blocks, bid)) return;
+        seen.add(bid);
+        const blk = blocks[bid];
+        if (!isDict(blk)) return;
+        if (blk.shadow !== true && !REUSE_PURE_REPORTER_OPS.has(blk.opcode)) {
+          unsafe = true;
+          return;
+        }
+        if (!isDict(blk.inputs)) return;
+        for (const [key, entry] of Object.entries(blk.inputs)) {
+          if (key === "SUBSTACK" || key === "SUBSTACK2") continue;
+          if (!isArr(entry)) continue;
+          for (let i = 1; i < entry.length; i++) {
+            if (isStr(entry[i])) visit(entry[i]);
+          }
+        }
+      };
+      if (isDict(stmt.inputs)) {
+        for (const [key, entry] of Object.entries(stmt.inputs)) {
+          if (key === "SUBSTACK" || key === "SUBSTACK2") continue;
+          if (!isArr(entry)) continue;
+          for (let i = 1; i < entry.length; i++) {
+            if (isStr(entry[i])) visit(entry[i]);
+          }
+        }
+      }
+      return unsafe;
+    }
+
+    _collectReporterOccurrences(blocks, stmtId, index, out, canonCache, memo, ctx) {
+      const stmt = blocks[stmtId];
+      if (!isDict(stmt) || !isDict(stmt.inputs)) return;
+      const seen = new Set();
+      let order = 0;
+      const visit = (bid, parentId, entry, itemIndex) => {
+        if (!isStr(bid) || seen.has(bid) || !has(blocks, bid)) return;
+        seen.add(bid);
+        const blk = blocks[bid];
+        if (!isDict(blk)) return;
+        order += 1;
+        if (blk.shadow !== true && blk.topLevel !== true) {
+          let info = memo.get(bid);
+          if (info === undefined) {
+            info = this._reporterCandidateRoot(blocks, bid, ctx, canonCache);
+            memo.set(bid, info);
+          }
+          if (info) {
+            out.push({
+              blockId: bid, parentId, entry, itemIndex, index, order,
+              sig: info.sig, deps: info.deps, cost: info.cost, inWarp: info.inWarp
+            });
+          }
+        }
+        if (!isDict(blk.inputs)) return;
+        for (const [key, childEntry] of Object.entries(blk.inputs)) {
+          if (key === "SUBSTACK" || key === "SUBSTACK2") continue;
+          if (!isArr(childEntry)) continue;
+          for (let i = 1; i < childEntry.length; i++) {
+            if (isStr(childEntry[i])) visit(childEntry[i], bid, childEntry, i);
+          }
+        }
+      };
+      for (const [key, entry] of Object.entries(stmt.inputs)) {
+        if (key === "SUBSTACK" || key === "SUBSTACK2") continue;
+        if (this._reporterInputReevaluated(stmt, key)) continue;
+        if (!isArr(entry)) continue;
+        for (let i = 1; i < entry.length; i++) {
+          if (isStr(entry[i])) visit(entry[i], stmtId, entry, i);
+        }
+      }
+    }
+
+    _reporterInputReevaluated(stmt, key) {
+      const op = stmt.opcode;
+      if (key === "CONDITION") {
+        return op === "control_repeat_until" || op === "control_while" ||
+          op === "control_wait_until";
+      }
+      if (key === "VALUE") return op === "control_for_each";
+      return false;
+    }
+
+    _reporterCandidateRoot(blocks, rootId, ctx, canonCache) {
+      const root = blocks[rootId];
+      if (!isDict(root) || root.shadow === true || root.topLevel === true) return null;
+      if (!REUSE_REPORTER_OPS.has(root.opcode)) return null;
+      const seen = new Set();
+      const stack = [rootId];
+      let cost = 0, nodes = 0;
+      while (stack.length) {
+        const bid = stack.pop();
+        if (!isStr(bid) || seen.has(bid) || !has(blocks, bid)) continue;
+        seen.add(bid);
+        const blk = blocks[bid];
+        if (!isDict(blk)) return null;
+        if (isStr(blk.next) && blk.next) return null;
+        if (blk.shadow === true) {
+          // Menu and literal shadows are constants; they never run code.
+        } else {
+          if (blk.topLevel === true) return null;
+          if (!REUSE_REPORTER_OPS.has(blk.opcode)) return null;
+          nodes += 1;
+        }
+        cost += 4 + bid.length + JSON.stringify(blk).length;
+        if (!isDict(blk.inputs)) continue;
+        for (const [key, entry] of Object.entries(blk.inputs)) {
+          if (key === "SUBSTACK" || key === "SUBSTACK2") return null;
+          if (!isArr(entry)) continue;
+          for (let i = 1; i < entry.length; i++) {
+            const item = entry[i];
+            if (isStr(item)) stack.push(item);
+            else if (isArr(item)) cost += JSON.stringify(item).length;
+          }
+        }
+      }
+      if (!nodes) return null;
+      const sig = this._canonicalBlock(blocks, rootId, canonCache, false);
+      const deps = this._reporterDeps(blocks, rootId, ctx);
+      const inWarp = this._enclosingDefinitionIsWarp(blocks, rootId);
+      if (deps.frame && !inWarp) return null;
+      return { cost, nodes, sig, deps, inWarp };
+    }
+
+    _reporterDeps(blocks, rootId, ctx) {
+      const deps = {
+        vars: new Set(), lists: new Set(), varNames: new Set(), listNames: new Set(),
+        anyVar: false, anyList: false, state: false, frame: false
+      };
+      const seen = new Set();
+      const addVar = (name, id) => {
+        if (isStr(id)) deps.vars.add(id);
+        if (isStr(name)) deps.varNames.add(name);
+        if (!isStr(id) && !isStr(name)) deps.anyVar = true;
+      };
+      const addList = (name, id) => {
+        if (isStr(id)) deps.lists.add(id);
+        if (isStr(name)) deps.listNames.add(name);
+        if (!isStr(id) && !isStr(name)) deps.anyList = true;
+      };
+      const fromArray = (value) => {
+        if (!isArr(value) || !value.length) return;
+        if (value[0] === 12) addVar(value[1], value[2]);
+        else if (value[0] === 13) addList(value[1], value[2]);
+      };
+      const visit = (bid) => {
+        if (!isStr(bid) || seen.has(bid) || !has(blocks, bid)) return;
+        seen.add(bid);
+        const blk = blocks[bid];
+        if (!isDict(blk)) return;
+        const op = blk.opcode;
+        if (op === "data_variable") {
+          const fv = (blk.fields || {}).VARIABLE;
+          if (isArr(fv) && fv.length) addVar(fv[0], fv.length > 1 ? fv[1] : null);
+          else deps.anyVar = true;
+        } else if (LIST_READ_OPS.has(op)) {
+          const fv = (blk.fields || {}).LIST;
+          if (isArr(fv) && fv.length) addList(fv[0], fv.length > 1 ? fv[1] : null);
+          else deps.anyList = true;
+        } else if (op === "sensing_of") {
+          deps.state = true;
+          deps.frame = true;
+          const pv = (blk.fields || {}).PROPERTY;
+          const pname = isArr(pv) ? pv[0] : null;
+          if (isStr(pname) && !SENSING_STAGE_PROPERTIES.has(pname) &&
+              !SENSING_SPRITE_PROPERTIES.has(pname)) {
+            let objName = this._reporterSensingObject(blocks, blk);
+            if (objName === "_stage_") objName = this.stageName;
+            const vscope = isStr(objName) ? ctx.varsByTarget.get(objName) : null;
+            const lscope = isStr(objName) ? ctx.listsByTarget.get(objName) : null;
+            const vids = vscope ? vscope.get(pname) : null;
+            const lids = lscope ? lscope.get(pname) : null;
+            if (vids) addAll(deps.vars, vids);
+            else if (lids) addAll(deps.lists, lids);
+            else { deps.anyVar = true; deps.anyList = true; }
+            if (isStr(pname)) {
+              deps.varNames.add(pname);
+              deps.listNames.add(pname);
+            }
+          }
+        } else if (op === "motion_xposition" || op === "motion_yposition" ||
+                   op === "motion_direction" || op === "looks_size" ||
+                   op === "looks_costumenumbername" || op === "looks_backdropnumbername" ||
+                   op === "sound_volume") {
+          deps.state = true;
+        } else if (isStr(op) && op.startsWith("sensing_")) {
+          deps.state = true;
+          deps.frame = true;
+        }
+        if (!isDict(blk.inputs)) return;
+        for (const entry of Object.values(blk.inputs)) {
+          if (!isArr(entry)) continue;
+          for (let i = 1; i < entry.length; i++) {
+            const item = entry[i];
+            if (isStr(item)) visit(item);
+            else if (isArr(item)) fromArray(item);
+          }
+        }
+      };
+      visit(rootId);
+      return deps;
+    }
+
+    _reporterSensingObject(blocks, blk) {
+      const fv = (blk.fields || {}).OBJECT;
+      if (isArr(fv) && isStr(fv[0])) return fv[0];
+      const entry = (blk.inputs || {}).OBJECT;
+      if (isArr(entry)) {
+        for (let i = 1; i < entry.length; i++) {
+          if (!isStr(entry[i]) || !has(blocks, entry[i])) continue;
+          const menu = blocks[entry[i]];
+          const mf = isDict(menu) ? (menu.fields || {}).OBJECT : null;
+          if (isArr(mf) && isStr(mf[0])) return mf[0];
+        }
+      }
+      return null;
+    }
+
+    _reporterCandidateInfo(chain, script, run, order) {
+      const first = run[0], last = run[run.length - 1];
+      const firstStmt = chain.ids[first.index];
+      const lastStmt = chain.ids[last.index];
+      const startOrder = order.get(firstStmt);
+      if (startOrder === undefined || order.get(lastStmt) === undefined) return null;
+      const n = run.length;
+      const readCost = 70, setCost = 130, varCost = 30;
+      const net = (n - 1) * first.cost - n * readCost - setCost - varCost;
+      if (net <= 0) return null;
+      return {
+        chain, script, occs: run, deps: first.deps, cost: first.cost, net,
+        firstStmt, lastStmt, startOrder, order
+      };
+    }
+
+    _reporterGapClean(blocks, chain, prev, cur) {
+      if (prev.index === cur.index) return true;
+      const deps = prev.deps;
+      const inWarp = prev.inWarp;
+      const state = {
+        universal: false, state: false, frame: false,
+        vars: new Set(), varNames: new Set(), lists: new Set(), listNames: new Set(),
+        anyVarWrite: false, anyListWrite: false
+      };
+      const seen = new Set();
+      const scanNode = (bid) => {
+        if (state.universal || !isStr(bid) || seen.has(bid) || !has(blocks, bid)) return;
+        seen.add(bid);
+        const blk = blocks[bid];
+        if (!isDict(blk)) return;
+        if (blk.shadow !== true) this._scanReporterEffect(blk, state, inWarp);
+        if (state.universal || !isDict(blk.inputs)) return;
+        for (const [key, entry] of Object.entries(blk.inputs)) {
+          if (!isArr(entry)) continue;
+          if (key === "SUBSTACK" || key === "SUBSTACK2") continue;
+          for (let i = 1; i < entry.length; i++) {
+            const item = entry[i];
+            if (isStr(item)) scanNode(item);
+          }
+        }
+      };
+      const scanStatement = (bid) => {
+        if (state.universal || !isStr(bid)) return;
+        scanNode(bid);
+        const blk = blocks[bid];
+        if (state.universal || !isDict(blk) || !isDict(blk.inputs)) return;
+        for (const key of ["SUBSTACK", "SUBSTACK2"]) {
+          const value = blk.inputs[key];
+          if (!isArr(value) || !isStr(value[1])) continue;
+          for (const sid of this._chainIds(blocks, value[1], 1000000)) scanStatement(sid);
+        }
+      };
+      for (let i = prev.index; i < cur.index; i++) {
+        scanStatement(chain.ids[i]);
+        if (state.universal) return false;
+      }
+      if (this._reporterStatementUnsafe(blocks, chain.ids[cur.index])) return false;
+      if (deps.state && state.state) return false;
+      if (deps.frame && (state.frame || !inWarp)) return false;
+      if (deps.anyVar && state.anyVarWrite) return false;
+      if (deps.anyList && state.anyListWrite) return false;
+      for (const id of state.vars) if (deps.vars.has(id)) return false;
+      for (const name of state.varNames) if (deps.varNames.has(name)) return false;
+      for (const id of state.lists) if (deps.lists.has(id)) return false;
+      for (const name of state.listNames) if (deps.listNames.has(name)) return false;
+      return true;
+    }
+
+    _scanReporterEffect(blk, state, inWarp) {
+      const op = blk.opcode;
+      if (!isStr(op)) { state.universal = true; return; }
+      if (REUSE_PURE_REPORTER_OPS.has(op)) return;
+      if (op === "control_repeat" || op === "control_forever" ||
+          op === "control_repeat_until" || op === "control_while" ||
+          op === "control_for_each") {
+        if (!inWarp) { state.universal = true; return; }
+      }
+      if (op === "data_setvariableto" || op === "data_changevariableby" ||
+          op === "control_for_each") {
+        const fv = (blk.fields || {}).VARIABLE;
+        state.anyVarWrite = true;
+        if (isArr(fv) && fv.length) {
+          if (isStr(fv[1])) state.vars.add(fv[1]);
+          if (isStr(fv[0])) state.varNames.add(fv[0]);
+        }
+        return;
+      }
+      if (LIST_WRITE_OPS.has(op)) {
+        const fv = (blk.fields || {}).LIST;
+        state.anyListWrite = true;
+        if (isArr(fv) && fv.length) {
+          if (isStr(fv[1])) state.lists.add(fv[1]);
+          if (isStr(fv[0])) state.listNames.add(fv[0]);
+        }
+        return;
+      }
+      if (op === "data_showvariable" || op === "data_hidevariable" ||
+          op === "data_showlist" || op === "data_hidelist") return;
+      if (op === "sensing_resettimer") { state.frame = true; return; }
+      if (op === "sensing_setdragmode") return;
+      if (op === "control_if" || op === "control_if_else" ||
+          op === "control_all_at_once") return;
+      if (REUSE_YIELD_OPS.has(op)) { state.universal = true; return; }
+      if (op === "event_broadcast" || op === "event_broadcastandwait") {
+        state.universal = true;
+        return;
+      }
+      if (op === "control_create_clone_of") { state.state = true; return; }
+      if (op.startsWith("sensing_")) { state.frame = true; state.state = true; return; }
+      if (op.startsWith("motion_") || op.startsWith("looks_") || op.startsWith("sound_")) {
+        state.state = true;
+        return;
+      }
+      if (op.startsWith("argument_reporter") || this._isHatOpcode(op)) return;
+      state.universal = true;
+    }
+
+    _applyReporterReuseGroup(blocks, group, temp, ctx) {
+      const occs = group.occs;
+      const first = occs[0];
+      const stmtId = group.chain.ids[first.index];
+      if (!isStr(stmtId) || !has(blocks, stmtId)) return null;
+      for (const occ of occs) {
+        if (!isArr(occ.entry) || occ.entry[occ.itemIndex] !== occ.blockId) return null;
+      }
+      const stmt = blocks[stmtId];
+      if (!isDict(stmt)) return null;
+
+      const setId = this._newReuseBlockId(blocks, ctx);
+      const setBlk = {
+        opcode: "data_setvariableto",
+        next: stmtId,
+        parent: null,
+        inputs: { VALUE: [2, first.blockId] },
+        fields: { VARIABLE: [temp.name, temp.id] }
+      };
+
+      const parentId = stmt.parent;
+      const parent = isStr(parentId) && has(blocks, parentId) ? blocks[parentId] : null;
+      let linked = false;
+      if (isDict(parent)) {
+        if (parent.next === stmtId) {
+          parent.next = setId;
+          setBlk.parent = parentId;
+          linked = true;
+        }
+        if (!linked && isDict(parent.inputs)) {
+          for (const entry of Object.values(parent.inputs)) {
+            if (isArr(entry) && entry.length > 1 && entry[1] === stmtId) {
+              entry[1] = setId;
+              setBlk.parent = parentId;
+              linked = true;
+              break;
+            }
+          }
+        }
+      }
+      if (!linked) {
+        if (stmt.topLevel !== true) return null;
+        setBlk.topLevel = true;
+        if (has(stmt, "x")) { setBlk.x = stmt.x; delete stmt.x; }
+        if (has(stmt, "y")) { setBlk.y = stmt.y; delete stmt.y; }
+        delete stmt.topLevel;
+      }
+      stmt.parent = setId;
+      blocks[setId] = setBlk;
+
+      for (const occ of occs) {
+        const readId = this._newReuseBlockId(blocks, ctx);
+        const read = {
+          opcode: "data_variable",
+          parent: occ.parentId,
+          fields: { VARIABLE: [temp.name, temp.id] }
+        };
+        blocks[readId] = read;
+        occ.entry[occ.itemIndex] = readId;
+        if (occ === first) {
+          const root = blocks[occ.blockId];
+          if (isDict(root)) root.parent = setId;
+        } else {
+          for (const bid of this._collectSubgraph(blocks, occ.blockId, false)) delete blocks[bid];
+        }
+      }
+      return { uses: occs.length };
+    }
+
     _freeze(value) {
       if (isDict(value)) {
         const keys = Object.keys(value).sort();

@@ -87,6 +87,9 @@
         noop_calls_removed: "do-nothing calls removed",
         noop_receivers_removed: "do-nothing receivers removed",
         noop_broadcasts_removed: "dead broadcasts removed",
+        reporter_values_cached: "repeated reporters cached",
+        reporter_uses_reused: "reporter reads reused",
+        temp_vars_created: "temporary variables created",
         noop_messages_removed: "dead messages removed",
         procs_inlined: "single-use definitions inlined",
         const_values_folded: "constant expressions folded",
@@ -185,6 +188,9 @@
         noop_calls_removed: "何もしない呼び出しを削除",
         noop_receivers_removed: "何もしない受信を削除",
         noop_broadcasts_removed: "不要なブロードキャストを削除",
+        reporter_values_cached: "同じレポーターを保存",
+        reporter_uses_reused: "レポーターの参照を再利用",
+        temp_vars_created: "作成した一時変数",
         noop_messages_removed: "不要なメッセージを削除",
         procs_inlined: "1回だけの定義を展開",
         const_values_folded: "定数計算を畳み込み",
@@ -222,6 +228,7 @@
     "stripDefaults", "shortenIds", "renameStores", "removeUnused", "keepMonitors", "clearInitialValues",
     "dropObscuredShadows", "removeUnreachable", "extractDuplicates", "nearDuplicates",
     "loopDuplicates", "inlineSingleCall", "removeNoops", "simplifyIfElse",
+    "reuseReporters",
     "compressProcs", "freqIds", "foldConstants", "propagateConstants"
   ];
   var PROJECT_KEY = "sb3-full-project-v1";
@@ -879,6 +886,7 @@
       ["defaults removed", s.fields_removed], ["unused vars/lists", (s.vars_removed || 0) + (s.lists_removed || 0)],
       ["unreachable blocks", s.unreachable_blocks_removed], ["duplicates", s.duplicates_extracted],
       ["near-duplicates", s.near_duplicates_extracted], ["loops", s.loops_created],
+      ["reporters cached", s.reporter_values_cached],
       ["folded values", s.const_values_folded], ["defs inlined", s.procs_inlined]
     ];
     return pick.filter(function (p) { return Number(p[1]) > 0; })

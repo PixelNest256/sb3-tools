@@ -44,6 +44,9 @@
         noop_calls_removed: "do-nothing calls removed",
         noop_receivers_removed: "do-nothing receivers removed",
         noop_broadcasts_removed: "dead broadcasts removed",
+        reporter_values_cached: "repeated reporters cached",
+        reporter_uses_reused: "reporter reads reused",
+        temp_vars_created: "temporary variables created",
         noop_messages_removed: "dead messages removed",
         procs_inlined: "single-use definitions inlined",
         const_values_folded: "constant expressions folded",
@@ -143,6 +146,9 @@
         noop_calls_removed: "何もしない呼び出しを削除",
         noop_receivers_removed: "何もしない受信を削除",
         noop_broadcasts_removed: "不要なブロードキャストを削除",
+        reporter_values_cached: "同じレポーターを保存",
+        reporter_uses_reused: "レポーターの参照を再利用",
+        temp_vars_created: "作成した一時変数",
         noop_messages_removed: "不要なメッセージを削除",
         procs_inlined: "1回だけの定義を展開",
         const_values_folded: "定数計算を畳み込み",
@@ -236,6 +242,7 @@
     foldConstants: true,
     loopDuplicates: true,
     propagateConstants: true,
+    reuseReporters: true,
     stripComments: false,
     compactWorkspace: false
   };
@@ -255,7 +262,7 @@
         "foldConstants", "propagateConstants"
       ]],
       ["optimize", [
-        "extractDuplicates", "nearDuplicates", "loopDuplicates"
+        "extractDuplicates", "nearDuplicates", "loopDuplicates", "reuseReporters"
       ]],
       ["max", [
         "stripComments", "compactWorkspace"
@@ -290,6 +297,9 @@
     "duplicates_extracted",
     "near_duplicates_extracted",
     "loops_created",
+    "reporter_values_cached",
+    "reporter_uses_reused",
+    "temp_vars_created",
     "vars_removed",
     "lists_removed",
     "procs_renamed",
