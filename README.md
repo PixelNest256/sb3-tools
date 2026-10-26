@@ -28,6 +28,8 @@ Each tool has an English page and a Japanese page (`…/ja/`). Use `docs/sb3/`,
 - **Rename** block IDs to short generated IDs. Variable, list, and message
   names, plus custom-block proccodes and arguments, are only shortened when the
   matching option is on — with just IDs shortened, every name stays as it was.
+  Shortened stores are numbered per target, so an ID is only as long as that
+  sprite (or the stage) actually needs; dropping unused stores leaves no gaps.
 - **Keep** monitors by default: the variable or list a monitor shows is neither
   dropped nor renamed, and the monitor keeps its position, so the stage looks
   the same. Turning on "don't keep monitors" (the **Maximum** preset) drops

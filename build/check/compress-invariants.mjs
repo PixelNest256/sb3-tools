@@ -353,8 +353,47 @@ check(keptCall && keptCall.mutation && keptCall.mutation.proccode === "do %s",
 
 // The default mix still shortens both, so existing output is unchanged.
 const bothOut = SB3.compressProject(buildProject(), new SB3.Options({ removeMonitors: true }), () => {});
-check(namesOf(bothOut.project.targets[0].variables).every((n) => /^V/.test(String(n))),
-  "the default no longer shortens variable names");
+const bothNames = namesOf(bothOut.project.targets[0].variables);
+check(bothNames.length === 2 && bothNames.every((n) => /^[A-Z]$/.test(String(n))),
+  `the default no longer emits the shortest variable names (${JSON.stringify(bothNames)})`);
+
+// A cloud variable keeps Scratch's "☁ " marker, but that marker is not a
+// reason to make an ordinary variable skip a letter: "☁ A" and "A" are two
+// different names.
+const cloudOut = SB3.compressProject({
+  targets: [{
+    isStage: true, name: "Stage",
+    variables: {
+      cloud: ["\u2601 points", 0],
+      alpha: ["alpha", 0],
+      beta: ["beta", 0]
+    },
+    lists: {}, broadcasts: {},
+    blocks: {
+      hat: blk("event_whenflagclicked", { topLevel: true, next: "setA", x: 0, y: 0 }),
+      setA: blk("data_setvariableto", {
+        parent: "hat", next: "setB",
+        inputs: { VALUE: [1, [4, "1"]] }, fields: { VARIABLE: ["alpha", "alpha"] }
+      }),
+      setB: blk("data_setvariableto", {
+        parent: "setA", next: "setC",
+        inputs: { VALUE: [1, [4, "2"]] }, fields: { VARIABLE: ["beta", "beta"] }
+      }),
+      setC: blk("data_setvariableto", {
+        parent: "setB",
+        inputs: { VALUE: [1, [4, "3"]] }, fields: { VARIABLE: ["\u2601 points", "cloud"] }
+      })
+    }
+  }],
+  monitors: []
+}, new SB3.Options({}), () => {});
+const cloudVars = cloudOut.project.targets[0].variables;
+const cloudNames = namesOf(cloudVars).sort();
+check(cloudNames.length === 3 &&
+  cloudNames[0] === "A" && cloudNames[1] === "B" && cloudNames[2] === "\u2601 A",
+  `cloud variables did not get the shortest names (${JSON.stringify(cloudNames)})`);
+check(Object.keys(cloudVars).sort().join("") === "ABC",
+  `cloud variables did not get the shortest store ids (${JSON.stringify(Object.keys(cloudVars))})`);
 
 /*
  * Extra regressions, both of which reached users as "the project breaks or the
@@ -590,7 +629,9 @@ check(merged.stats.near_duplicates_extracted >= 1,
     const cb = (def.inputs || {}).custom_block;
     const proto = blocks[Array.isArray(cb) ? cb[1] : null];
     const code = (proto && proto.mutation && proto.mutation.proccode) || "";
-    if (!code.startsWith("ndup")) continue;
+    // The nested fixture ships one hand-written definition ("paint %s %s").
+    // Every other definition is a newly generated near-duplicate merge.
+    if (!code || code === "paint %s %s") continue;
     // Count reporters that belong to this definition body.
     const stack = [def.next];
     const seen = new Set();
@@ -700,7 +741,7 @@ const stopMerged = SB3.compressProject(buildStopMergeProject(), new SB3.Options(
     const cb = (def.inputs || {}).custom_block;
     const proto = blocks[Array.isArray(cb) ? cb[1] : null];
     const code = (proto && proto.mutation && proto.mutation.proccode) || "";
-    if (!code.startsWith("ndup")) continue;
+    if (!code) continue;
     generatedBodies += 1;
     const stack = [def.next];
     const seen = new Set();
