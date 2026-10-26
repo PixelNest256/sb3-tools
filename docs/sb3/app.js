@@ -243,6 +243,7 @@
     loopDuplicates: true,
     propagateConstants: true,
     reuseReporters: true,
+    repeatPasses: 1,
     stripComments: false,
     compactWorkspace: false
   };
@@ -343,6 +344,10 @@
     document.querySelectorAll("input[data-opt]")
   );
 
+  var numberInputs = Array.prototype.slice.call(
+    document.querySelectorAll("input[data-opt-number]")
+  );
+
   var presetButtons = Array.prototype.slice.call(
     document.querySelectorAll("button[data-preset]")
   );
@@ -382,10 +387,26 @@
     return Number(n || 0).toLocaleString("en-US");
   }
 
+  function clampPasses(value) {
+    var n = parseInt(value, 10);
+    if (!Number.isFinite(n)) return 1;
+    return Math.max(1, Math.min(10, n));
+  }
+
+  function readNumberOption(input) {
+    var key = input.getAttribute("data-opt-number");
+    var n = clampPasses(input.value);
+    input.value = String(n);
+    return n;
+  }
+
   function readOptions() {
     var out = {};
     optionInputs.forEach(function (input) {
       out[input.getAttribute("data-opt")] = input.checked;
+    });
+    numberInputs.forEach(function (input) {
+      out[input.getAttribute("data-opt-number")] = readNumberOption(input);
     });
     return out;
   }
@@ -403,7 +424,11 @@
     }
     if (stored && typeof stored === "object") {
       Object.keys(DEFAULTS).forEach(function (key) {
-        if (typeof stored[key] === "boolean") out[key] = stored[key];
+        if (typeof DEFAULTS[key] === "number") {
+          if (typeof stored[key] === "number") out[key] = clampPasses(stored[key]);
+        } else if (typeof stored[key] === "boolean") {
+          out[key] = stored[key];
+        }
       });
     }
     return out;
@@ -413,6 +438,11 @@
     optionInputs.forEach(function (input) {
       var key = input.getAttribute("data-opt");
       input.checked = values[key] === true;
+    });
+    numberInputs.forEach(function (input) {
+      var key = input.getAttribute("data-opt-number");
+      var value = typeof values[key] === "number" ? values[key] : DEFAULTS[key];
+      input.value = String(clampPasses(value));
     });
   }
 
@@ -434,11 +464,19 @@
       var key = input.getAttribute("data-opt");
       out[key] = wanted[key] === true;
     });
+    numberInputs.forEach(function (input) {
+      out[input.getAttribute("data-opt-number")] = DEFAULTS[
+        input.getAttribute("data-opt-number")
+      ];
+    });
     return out;
   }
 
   function sameOptions(a, b) {
     return Object.keys(a).every(function (key) {
+      if (typeof a[key] === "number" || typeof b[key] === "number") {
+        return Number(a[key]) === Number(b[key]);
+      }
       return (a[key] === true) === (b[key] === true);
     });
   }
@@ -1001,6 +1039,14 @@
 
   optionInputs.forEach(function (input) {
     input.addEventListener("change", function () {
+      markStale();
+      updatePresetUI();
+    });
+  });
+
+  numberInputs.forEach(function (input) {
+    input.addEventListener("change", function () {
+      readNumberOption(input);
       markStale();
       updatePresetUI();
     });

@@ -726,6 +726,98 @@ const stopMerged = SB3.compressProject(buildStopMergeProject(), new SB3.Options(
     "the stop-free near-duplicate fixture did not merge anything (test no longer exercises the merge path)");
 }
 
+/*
+ * 4. Advanced pass repetition.  Reporter reuse applies at most 30 groups per
+ *    call, so a target with more candidates only finishes on a later pass.
+ *    The fixture below has enough independent reporters to prove that
+ *    `repeatPasses: 2` caches more (and serializes smaller) than one pass.
+ *    Exact and near-duplicate extraction have their own internal 200-group
+ *    caps, which the same outer loop covers.
+ */
+function buildRepeatReporterProject() {
+  const VID = "variableLongIdForRepeatTest01";
+  const blocks = {
+    hat: blk("event_whenflagclicked", { topLevel: true, x: 0, y: 0 })
+  };
+  let prev = "hat";
+  for (let g = 0; g < 31; g++) {
+    for (let copy = 0; copy < 10; copy++) {
+      const sayId = `say_${g}_${copy}`;
+      blocks[prev].next = sayId;
+      blocks[sayId] = blk("looks_say", {
+        parent: prev,
+        inputs: { MESSAGE: [3, `join_${g}_${copy}_0`, [10, ""]] }
+      });
+      prev = sayId;
+      const varBlock = `var_${g}_${copy}`;
+      let child = varBlock;
+      for (let d = 11; d >= 0; d--) {
+        const joinId = `join_${g}_${copy}_${d}`;
+        blocks[joinId] = blk("operator_join", {
+          parent: d === 0 ? sayId : `join_${g}_${copy}_${d - 1}`,
+          inputs: {
+            STRING1: [3, child, [10, ""]],
+            STRING2: [1, [10, `v${g}-${d}`]]
+          }
+        });
+        child = joinId;
+      }
+      blocks[varBlock] = blk("data_variable", {
+        parent: `join_${g}_${copy}_11`, fields: { VARIABLE: ["x", VID] }
+      });
+    }
+  }
+  return {
+    targets: [{
+      isStage: false, name: "Sprite1",
+      variables: { [VID]: ["x", 0] }, lists: {}, broadcasts: {},
+      blocks, comments: {},
+      currentCostume: 0,
+      costumes: [{
+        name: "c", dataFormat: "svg", assetId: "0".repeat(32),
+        md5ext: "0".repeat(32) + ".svg", bitmapResolution: 1,
+        rotationCenterX: 10, rotationCenterY: 10
+      }],
+      sounds: [], volume: 100, layerOrder: 0, visible: true, x: 0, y: 0, size: 100,
+      direction: 90, draggable: false, rotationStyle: "all around"
+    }],
+    monitors: [], extensions: [], meta: { semver: "3.0.0" }
+  };
+}
+
+const repeatBase = {
+  extractDuplicates: false,
+  nearDuplicates: false,
+  loopDuplicates: false,
+  inlineSingleCall: false,
+  removeNoops: false,
+  simplifyIfElse: false,
+  foldConstants: false,
+  propagateConstants: false,
+  removeUnused: false,
+  clearInitialValues: false,
+  stripDefaults: false,
+  renameStores: false,
+  compressProcs: false,
+  keepMonitors: false
+};
+const onePass = SB3.compressProject(buildRepeatReporterProject(), new SB3.Options(
+  Object.assign({}, repeatBase, { repeatPasses: 1 })), () => {});
+const twoPasses = SB3.compressProject(buildRepeatReporterProject(), new SB3.Options(
+  Object.assign({}, repeatBase, { repeatPasses: 2 })), () => {});
+audit(twoPasses.project);
+check(twoPasses.stats.reporter_values_cached > onePass.stats.reporter_values_cached,
+  "a second advanced pass did not reuse the reporters left after the first pass");
+check(SB3.dumpsCompact(twoPasses.project).length <
+  SB3.dumpsCompact(onePass.project).length,
+  "a second advanced pass did not make the project smaller");
+check(new SB3.Options({ repeatPasses: 0 }).repeatPasses === 1,
+  "repeatPasses below 1 was not clamped");
+check(new SB3.Options({ repeatPasses: 99 }).repeatPasses === 10,
+  "repeatPasses above 10 was not clamped");
+check(new SB3.Options({ repeatPasses: "3" }).repeatPasses === 3,
+  "a numeric string was not accepted for repeatPasses");
+
 if (failures) {
   console.error(`\n${failures} check(s) failed`);
   process.exit(1);

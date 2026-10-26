@@ -222,6 +222,14 @@
   // ------------------------------------------------------------------
   class CompressError extends Error {}
 
+  const MAX_REPEAT_PASSES = 10;
+
+  function clampRepeatPasses(value) {
+    const n = Number(value);
+    if (!Number.isFinite(n)) return 1;
+    return Math.max(1, Math.min(MAX_REPEAT_PASSES, Math.trunc(n)));
+  }
+
   const DEFAULT_OPTIONS = {
     stripDefaults: true,
     shortenIds: true,
@@ -242,6 +250,7 @@
     loopDuplicates: true,
     propagateConstants: true,
     reuseReporters: true,
+    repeatPasses: 1,
     stripComments: false,
     compactWorkspace: false
   };
@@ -251,7 +260,9 @@
       Object.assign(this, DEFAULT_OPTIONS);
       if (isDict(values)) {
         for (const key of Object.keys(DEFAULT_OPTIONS)) {
-          if (key in values) this[key] = !!values[key];
+          if (!(key in values)) continue;
+          if (key === "repeatPasses") this[key] = clampRepeatPasses(values[key]);
+          else this[key] = !!values[key];
         }
       }
     }
@@ -362,15 +373,38 @@
 
       this.layerExpect = 0;
       const n = targets.length;
-      for (let i = 0; i < n; i++) {
-        if (this.cancelled()) throw new Error("Cancelled");
-        this.progress("targets", i / n, `Processing target ${i + 1}/${n}`);
-        this._processTarget(targets[i]);
-        this.progress("targets", (i + 1) / n, `Processing target ${i + 1}/${n}`);
+      const repeats = (o.extractDuplicates || o.nearDuplicates || o.reuseReporters) ?
+        clampRepeatPasses(o.repeatPasses) : 1;
+      for (let pass = 0; pass < repeats; pass++) {
+        const label = pass === 0
+          ? null
+          : `Repeating optimizations (pass ${pass + 1}/${repeats})...`;
+        for (let i = 0; i < n; i++) {
+          if (this.cancelled()) throw new Error("Cancelled");
+          const text = label || `Processing target ${i + 1}/${n}`;
+          this.progress("targets", (pass + i / n) / repeats, text);
+          if (pass === 0) this._processTarget(targets[i]);
+          else this._extractTargetDuplicates(targets[i]);
+          this.progress("targets", (pass + (i + 1) / n) / repeats, text);
+        }
+        if (o.reuseReporters) {
+          this.progress("targets", (pass + 1) / repeats,
+            label || "Reusing repeated reporter values...");
+          this._reuseReporters(targets);
+        }
+        // The blocks reporter reuse inserts are only normalised on the extra
+        // passes.  The first pass keeps the historical order exactly, so a
+        // project without leftover candidates serialises byte-for-byte the
+        // same as before this option existed.
+        if (pass > 0) {
+          for (const tgt of targets) {
+            if (this.cancelled()) throw new Error("Cancelled");
+            this._finalizeTargetBlocks(tgt, false);
+          }
+        }
       }
-      if (o.reuseReporters) {
-        this.progress("targets", 1.0, "Reusing repeated reporter values...");
-        this._reuseReporters(targets);
+      if (repeats > 1 && o.compactWorkspace) {
+        for (const tgt of targets) this._compactWorkspace(tgt);
       }
       if (this.cancelled()) throw new Error("Cancelled");
       this.progress("finalize", 0.5, "Processing monitors and metadata...");
@@ -1323,30 +1357,44 @@
       }
 
       const blocks = tgt.blocks;
-      let idMap = new Map();
       if (isDict(blocks) && Object.keys(blocks).length) this._dropDeadHideBlocks(blocks);
-      if (isDict(blocks) && Object.keys(blocks).length && o.extractDuplicates) {
-        this._extractDuplicates(blocks);
-      }
-      if (isDict(blocks) && Object.keys(blocks).length && o.nearDuplicates) {
-        this._extractNearDuplicates(blocks);
-      }
+      this._extractTargetDuplicates(tgt);
+      this._finalizeTargetBlocks(tgt, true);
+
+      if (o.stripComments) this._stripComments(tgt);
+      if (o.compactWorkspace) this._compactWorkspace(tgt);
+    }
+
+    _extractTargetDuplicates(tgt) {
+      if (!isDict(tgt)) return;
+      const blocks = tgt.blocks;
+      if (!isDict(blocks) || !Object.keys(blocks).length) return;
+      const o = this.options;
+      if (o.extractDuplicates) this._extractDuplicates(blocks);
+      if (o.nearDuplicates) this._extractNearDuplicates(blocks);
+    }
+
+    // Normalise the blocks a target has after a pass.  Extra optimization
+    // passes reuse this with `rename = false`: their generated blocks already
+    // have short ids, and renumbering every existing block once per pass would
+    // inflate the reported rename count without making the project smaller.
+    _finalizeTargetBlocks(tgt, rename) {
+      if (!isDict(tgt)) return;
+      const o = this.options;
+      const blocks = tgt.blocks;
+      let idMap = new Map();
       if (isDict(blocks) && Object.keys(blocks).length) {
         this._normalizeParentMarkers(blocks);
         this._normalizeMutations(blocks);
-      }
-      if (o.compressProcs && isDict(blocks) && Object.keys(blocks).length) {
-        this._compressProcs(blocks);
-      }
-      if (o.shortenIds && isDict(blocks) && Object.keys(blocks).length) {
-        this._shortenArgumentIds(blocks);
-      }
-      if (isDict(blocks) && o.shortenIds && Object.keys(blocks).length) {
-        const pair = this._renameBlocks(blocks);
-        tgt.blocks = pair[0];
-        idMap = pair[1];
-      } else if (isDict(blocks) && Object.keys(blocks).length) {
-        this._stripBlockDefaults(blocks);
+        if (o.compressProcs && rename) this._compressProcs(blocks);
+        if (o.shortenIds) this._shortenArgumentIds(blocks);
+        if (o.shortenIds && rename) {
+          const pair = this._renameBlocks(blocks);
+          tgt.blocks = pair[0];
+          idMap = pair[1];
+        } else {
+          this._stripBlockDefaults(blocks);
+        }
       }
 
       if (idMap.size && isDict(tgt.comments)) {
@@ -1369,9 +1417,6 @@
         }
         tgt.comments = out;
       }
-
-      if (o.stripComments) this._stripComments(tgt);
-      if (o.compactWorkspace) this._compactWorkspace(tgt);
     }
 
     static _isHatOpcode(op) {

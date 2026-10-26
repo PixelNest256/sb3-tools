@@ -623,6 +623,25 @@ h1 {
 .opt input[type="checkbox"]:checked::after { transform: rotate(-45deg) translateY(-1px) scale(1); }
 .opt input[type="checkbox"]:focus-visible { outline: 2px solid var(--signal); outline-offset: 2px; }
 
+.opt-number {
+  grid-template-columns: minmax(0, 1fr) 58px;
+  align-items: center;
+}
+.opt-number input[type="number"] {
+  width: 58px;
+  padding: 3px 4px;
+  border: 1px solid var(--rule-light);
+  background: transparent;
+  color: var(--ink);
+  font-family: var(--mono);
+  font-size: 12px;
+  text-align: right;
+}
+.opt-number input[type="number"]:focus-visible {
+  outline: 2px solid var(--signal);
+  outline-offset: 2px;
+}
+
 .opt-warn {
   grid-template-columns: 14px minmax(0, 1fr) auto;
   align-items: center;
