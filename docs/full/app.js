@@ -225,7 +225,7 @@
   })();
 
   var PROJECT_KEYS = [
-    "stripDefaults", "shortenIds", "renameStores", "removeUnused", "keepMonitors", "clearInitialValues",
+    "stripDefaults", "shortenIds", "renameStores", "removeUnused", "removeMonitors", "clearInitialValues",
     "dropObscuredShadows", "removeUnreachable", "extractDuplicates", "nearDuplicates",
     "loopDuplicates", "inlineSingleCall", "removeNoops", "simplifyIfElse",
     "reuseReporters",
@@ -349,6 +349,9 @@
   function defaultProjectOptions() {
     var out = {};
     PROJECT_KEYS.forEach(function (key) { out[key] = true; });
+    // The full page has no presets: dropping hidden monitors stays opt-in,
+    // matching the non-maximum presets on /sb3/.
+    out.removeMonitors = false;
     return out;
   }
 

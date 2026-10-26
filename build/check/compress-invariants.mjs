@@ -227,7 +227,7 @@ function audit(project) {
   issues.forEach((i) => check(false, i));
 }
 
-const options = new SB3.Options({ keepMonitors: false });
+const options = new SB3.Options({ removeMonitors: true });
 const out = SB3.compressProject(buildProject(), options, () => {});
 audit(out.project);
 
@@ -266,9 +266,9 @@ check(out.stats.dead_hide_blocks_removed === 2, "hide blocks for removed stores 
 check(!Object.keys(t0.blocks).some((b) => ["data_hidevariable", "data_hidelist"].includes(t0.blocks[b].opcode)),
   "a hide block for a removed store is still present");
 
-// keepMonitors (the default): a displayed variable keeps its name and a hidden
-// monitor keeps its saved position, so neither the store nor the monitor may be
-// renamed or dropped.
+// Keeping monitors (the default): a displayed variable keeps its name and a
+// hidden monitor keeps its saved position, so neither the store nor the monitor
+// may be renamed or dropped.
 const monProject = buildProject();
 monProject.monitors = [
   { id: VID_COUNT, opcode: "data_variable", params: { VARIABLE: "count" }, spriteName: "Sprite1",
@@ -279,22 +279,22 @@ monProject.monitors = [
 const kept = SB3.compressProject(monProject, new SB3.Options({}), () => {});
 const keptTarget = kept.project.targets[0];
 const keptMons = kept.project.monitors || [];
-check(kept.stats.monitors_removed === 0, "keepMonitors removed a monitor");
-check(keptMons.length === 2, `keepMonitors dropped a monitor (${keptMons.length} left)`);
+check(kept.stats.monitors_removed === 0, "keeping monitors removed one");
+check(keptMons.length === 2, `keeping monitors dropped one (${keptMons.length} left)`);
 if (keptMons.length === 2) {
   check(keptMons[0].id === VID_COUNT && keptMons[0].params.VARIABLE === "count",
-    "keepMonitors renamed the displayed variable");
-  check(keptMons[0].x === 12 && keptMons[0].y === 34, "keepMonitors dropped the displayed monitor position");
+    "keeping monitors renamed the displayed variable");
+  check(keptMons[0].x === 12 && keptMons[0].y === 34, "keeping monitors dropped the displayed monitor position");
   check(keptMons[1].id === LID_DEAD && keptMons[1].params.LIST === "deadList",
-    "keepMonitors renamed the hidden monitor's list");
-  check(keptMons[1].x === 56 && keptMons[1].y === 78, "keepMonitors dropped the hidden monitor position");
+    "keeping monitors renamed the hidden monitor's list");
+  check(keptMons[1].x === 56 && keptMons[1].y === 78, "keeping monitors dropped the hidden monitor position");
 }
 check(keptTarget.variables && keptTarget.variables[VID_COUNT] && keptTarget.variables[VID_COUNT][0] === "count",
-  "keepMonitors renamed the displayed variable's store");
+  "keeping monitors renamed the displayed variable's store");
 check(keptTarget.lists && keptTarget.lists[LID_DEAD] && keptTarget.lists[LID_DEAD][0] === "deadList",
-  "keepMonitors removed or renamed the hidden monitor's list");
+  "keeping monitors removed or renamed the hidden monitor's list");
 // Renaming is off for kept stores, but every other store is still shortened.
-check(Object.keys(keptTarget.variables || {}).length === 2, "keepMonitors kept a variable it should not have");
+check(Object.keys(keptTarget.variables || {}).length === 2, "keeping monitors preserved a variable it should not have");
 
 /*
  * shortenIds owns ids; renameStores owns visible names. With the "no visible
@@ -319,7 +319,7 @@ namedTarget.blocks.receiveSay = blk("looks_say", {
   inputs: { MESSAGE: [1, [10, "go!"]] }
 });
 const noRename = SB3.compressProject(namedProject, new SB3.Options({
-  renameStores: false, compressProcs: false, removeUnused: false, keepMonitors: false
+  renameStores: false, compressProcs: false, removeUnused: false, removeMonitors: true
 }), () => {});
 const nt = noRename.project.targets[0];
 const namesOf = (table) => Object.values(table || {}).map((v) => (Array.isArray(v) ? v[0] : v));
@@ -352,7 +352,7 @@ check(keptCall && keptCall.mutation && keptCall.mutation.proccode === "do %s",
   "compressProcs=false left a call pointing at a renamed custom block");
 
 // The default mix still shortens both, so existing output is unchanged.
-const bothOut = SB3.compressProject(buildProject(), new SB3.Options({ keepMonitors: false }), () => {});
+const bothOut = SB3.compressProject(buildProject(), new SB3.Options({ removeMonitors: true }), () => {});
 check(namesOf(bothOut.project.targets[0].variables).every((n) => /^V/.test(String(n))),
   "the default no longer shortens variable names");
 
@@ -802,7 +802,7 @@ const repeatBase = {
   stripDefaults: false,
   renameStores: false,
   compressProcs: false,
-  keepMonitors: false
+  removeMonitors: true
 };
 const autoOnce = SB3.compressProject(buildRepeatReporterProject(), new SB3.Options(repeatBase), () => {});
 const autoTwice = SB3.compressProject(autoOnce.project, new SB3.Options(repeatBase), () => {});

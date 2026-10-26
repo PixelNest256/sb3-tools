@@ -116,7 +116,7 @@
             <button type="button" class="preset-btn" data-preset="safe" aria-pressed="false" title="Internal IDs, unused stores, unreachable code, and hidden defaults. Names stay as they are.">No visible change</button>
             <button type="button" class="preset-btn" data-preset="cleanup" aria-pressed="false" title="Also shorten names, remove do-nothing blocks, simplify if-else, inline single-use definitions, and fold constants.">Code cleanup</button>
             <button type="button" class="preset-btn" data-preset="optimize" aria-pressed="true" title="Also extract repeated code, merge similar code, and turn repeated runs into loops.">Code optimization</button>
-            <button type="button" class="preset-btn" data-preset="max" aria-pressed="false" title="Every option, including comment removal and re-flowing the workspace.">Maximum</button>
+            <button type="button" class="preset-btn" data-preset="max" aria-pressed="false" title="Every option, including hidden-monitor removal, comment removal, and re-flowing the workspace.">Maximum</button>
             <span class="preset-custom" id="presetCustom" role="status" hidden>Custom</span>
           </div>
         </div>
@@ -152,7 +152,7 @@
             <label class="opt"><input type="checkbox" checked data-opt="compressProcs"><span>Shorten custom block names</span></label>
             <label class="opt"><input type="checkbox" checked data-opt="foldConstants"><span>Calculate constant math</span></label>
             <label class="opt"><input type="checkbox" checked data-opt="propagateConstants"><span>Replace constant variables with values</span></label>
-            <label class="opt"><input type="checkbox" checked data-opt="keepMonitors"><span>Keep monitors and their positions</span></label>
+            <label class="opt" title="Deletes hidden monitors so their variables and lists can be shortened or removed. Visible monitors stay; their saved values are cleared."><input type="checkbox" data-opt="removeMonitors"><span>Don't keep monitors and their positions</span></label>
           </fieldset>
         </div>
 

@@ -228,7 +228,7 @@
     shortenIds: true,
     renameStores: true,
     removeUnused: true,
-    keepMonitors: true,
+    removeMonitors: false,
     compressProcs: true,
     freqIds: true,
     dropObscuredShadows: true,
@@ -254,7 +254,7 @@
       ["clean", []],
       ["safe", [
         "stripDefaults", "shortenIds", "freqIds",
-        "removeUnused", "keepMonitors", "dropObscuredShadows", "removeUnreachable",
+        "removeUnused", "dropObscuredShadows", "removeUnreachable",
         "clearInitialValues"
       ]],
       ["cleanup", [
@@ -265,7 +265,7 @@
         "extractDuplicates", "nearDuplicates", "loopDuplicates", "reuseReporters"
       ]],
       ["max", [
-        "stripComments", "compactWorkspace"
+        "stripComments", "compactWorkspace", "removeMonitors"
       ]]
     ];
     var keys = [];
