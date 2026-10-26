@@ -285,7 +285,10 @@
     propagateConstants: true,
     reuseReporters: true,
     stripComments: false,
-    compactWorkspace: false
+    compactWorkspace: false,
+    removeDeadAssets: false,
+    removeWriteOnly: false,
+    normalizeTypes: false
   };
 
   class Options {
@@ -323,7 +326,10 @@
         arg_ids_shortened: 0, mutation_keys_added: 0, monitors_removed: 0,
         dead_hide_blocks_removed: 0,
         comments_removed: 0, workspace_compacted: 0, float_values_rounded: 0,
-        optimization_passes: 0
+        optimization_passes: 0,
+        dead_costumes_removed: 0, dead_sounds_removed: 0, dead_sprites_removed: 0,
+        writeonly_vars_removed: 0, writeonly_lists_removed: 0,
+        md5ext_removed: 0, numeric_strings_normalized: 0, meta_agent_cleared: 0
       };
       this.varMap = new Map();
       this.listMap = new Map();
@@ -400,6 +406,18 @@
           o.foldConstants || o.loopDuplicates || o.propagateConstants) {
         this.progress("collect", 1.0, "Simplifying scripts...");
         this._simplifyProject(project);
+      }
+      if (o.removeDeadAssets) {
+        this.progress("collect", 1.0, "Removing dead assets...");
+        project.targets = this._removeDeadAssets(targets, project.monitors);
+      }
+      if (o.removeWriteOnly) {
+        this.progress("collect", 1.0, "Removing write-only variables and lists...");
+        this._removeWriteOnly(targets, project.monitors);
+      }
+      if (o.normalizeTypes) {
+        this.progress("collect", 1.0, "Normalizing types and representations...");
+        this._normalizeTypes(project);
       }
       if (o.shortenIds) {
         if (o.removeUnused) {
@@ -4947,6 +4965,330 @@
           }
         }
         if (!Object.keys(meta).length) delete project.meta;
+      }
+    }
+
+    // ------------------------------------------------------------------
+    // Proposal 1: Remove dead assets (costumes, sounds, sprites)
+    _removeDeadAssets(targets, monitors) {
+      const st = this.stats;
+      const stageName = this.stageName;
+
+      // Collect sprite name references
+      const referencedSpriteNames = new Set();
+      for (const mon of (isArr(monitors) ? monitors : [])) {
+        if (!isDict(mon)) continue;
+        if (mon.spriteName !== null && mon.spriteName !== undefined) {
+          referencedSpriteNames.add(mon.spriteName);
+        }
+      }
+
+      for (const tgt of targets) {
+        if (!isDict(tgt)) continue;
+        const isStage = !!tgt.isStage;
+        const tname = tgt.name;
+        const blocks = isDict(tgt.blocks) ? tgt.blocks : {};
+
+        // Check for costume/backdrop references
+        const usesNextCostume = Object.values(blocks).some(blk =>
+          isDict(blk) && (blk.opcode === "looks_nextcostume" ||
+            (isStage && blk.opcode === "looks_nextbackdrop")));
+        const usesCostumeReporter = Object.values(blocks).some(blk =>
+          isDict(blk) && (blk.opcode === "looks_costumenumbername" ||
+            (isStage && blk.opcode === "looks_backdropnumbername")));
+        const usesSensingOfCostume = Object.values(blocks).some(blk =>
+          isDict(blk) && blk.opcode === "sensing_of" &&
+          isDict(blk.fields) && isArr(blk.fields.PROPERTY) &&
+          blk.fields.PROPERTY[0] &&
+          ["costume #", "costume name", "backdrop #", "backdrop name"].includes(
+            blk.fields.PROPERTY[0].toLowerCase()));
+
+        const allCostumesNeeded = usesNextCostume || usesCostumeReporter || usesSensingOfCostume;
+
+        // Collect explicitly referenced costume names
+        const referencedCostumeNames = new Set();
+        for (const blk of Object.values(blocks)) {
+          if (!isDict(blk)) continue;
+          const op = blk.opcode;
+          const fields = blk.fields || {};
+          if (op === "looks_switchcostumeto" || op === "looks_switchbackdropto") {
+            const fv = fields.COSTUME || fields.BACKDROP;
+            if (isArr(fv) && fv[0]) referencedCostumeNames.add(fv[0]);
+          }
+        }
+
+        // Check for sound references
+        const usesAnySound = Object.values(blocks).some(blk =>
+          isDict(blk) && blk.opcode && blk.opcode.startsWith("sound_"));
+
+        // Collect explicitly referenced sound names
+        const referencedSoundNames = new Set();
+        for (const blk of Object.values(blocks)) {
+          if (!isDict(blk)) continue;
+          const fields = blk.fields || {};
+          const fv = fields.SOUND_MENU;
+          if (isArr(fv) && fv[0]) referencedSoundNames.add(fv[0]);
+        }
+
+        // Remove dead costumes
+        if (isArr(tgt.costumes)) {
+          const currentCostumeIndex = tgt.currentCostume || 0;
+          const currentCostume = tgt.costumes[currentCostumeIndex];
+          const currentCostumeName = currentCostume ? currentCostume.name : null;
+
+          const keptCostumes = [];
+          for (const c of tgt.costumes) {
+            if (allCostumesNeeded) {
+              keptCostumes.push(c);
+            } else if (c.name === currentCostumeName || referencedCostumeNames.has(c.name)) {
+              keptCostumes.push(c);
+            } else {
+              st.dead_costumes_removed += 1;
+            }
+          }
+          tgt.costumes = keptCostumes;
+        }
+
+        // Remove dead sounds
+        if (isArr(tgt.sounds)) {
+          const keptSounds = [];
+          for (const s of tgt.sounds) {
+            if (usesAnySound || referencedSoundNames.has(s.name)) {
+              keptSounds.push(s);
+            } else {
+              st.dead_sounds_removed += 1;
+            }
+          }
+          tgt.sounds = keptSounds;
+        }
+      }
+
+      // Remove dead sprites (visible: false, no scripts, no references)
+      // Return the filtered targets array to be assigned by the caller
+      const keptTargets = [];
+      for (const tgt of targets) {
+        if (!isDict(tgt) || tgt.isStage) {
+          keptTargets.push(tgt);
+          continue;
+        }
+
+        const hasScripts = isDict(tgt.blocks) && Object.keys(tgt.blocks).length > 0;
+        const isVisible = tgt.visible !== false;
+        const isReferenced = referencedSpriteNames.has(tgt.name);
+
+        if (!hasScripts && !isVisible && !isReferenced) {
+          st.dead_sprites_removed += 1;
+        } else {
+          keptTargets.push(tgt);
+        }
+      }
+      return keptTargets;
+    }
+
+    // ------------------------------------------------------------------
+    // Proposal 2: Remove write-only variables and lists
+    _removeWriteOnly(targets, monitors) {
+      const st = this.stats;
+
+      // In Scratch 3.0, sensing_of does NOT reference variables directly.
+      // It only references sprite properties. So we don't need to check sensing_of.
+
+      // A variable/list is "write-only" if:
+      // - It is written to (set/change/add/etc.)
+      // - It is NOT read from (variable reporter, list contents, item of, etc.)
+      // - It is NOT shown (monitor)
+      // - It is NOT a cloud variable
+      // - It is NOT a standalone reporter (top-level)
+
+      // Build read/write sets again (excluding write from "used")
+      const readV = new Set();
+      const writeV = new Set();
+      const readL = new Set();
+      const writeL = new Set();
+      const showV = new Set();
+      const showL = new Set();
+      const standaloneV = new Set();
+      const standaloneL = new Set();
+
+      const VAR_WRITE_OPS = new Set(["data_setvariableto", "data_changevariableby", "control_for_each"]);
+      const VAR_READ_OPS = new Set(["data_variable"]);
+      const LIST_WRITE_OPS = new Set(["data_addtolist", "data_deleteoflist", "data_deletealloflist",
+        "data_insertatlist", "data_replaceitemoflist"]);
+      const LIST_READ_OPS = new Set(["data_listcontents", "data_itemoflist", "data_itemnumoflist",
+        "data_lengthoflist", "data_listcontainsitem"]);
+
+      for (const tgt of targets) {
+        if (!isDict(tgt)) continue;
+        const blocks = isDict(tgt.blocks) ? tgt.blocks : {};
+
+        for (const [bid, blk] of Object.entries(blocks)) {
+          if (!isDict(blk)) continue;
+          const op = blk.opcode;
+          const fields = blk.fields || {};
+
+          // Variable references
+          if (fields.VARIABLE) {
+            const fv = fields.VARIABLE;
+            const vname = fv[0];
+            const vid = fv[1];
+
+            if (VAR_WRITE_OPS.has(op)) {
+              if (isStr(vid)) writeV.add(vid);
+            } else if (op === "data_showvariable") {
+              if (isStr(vid)) showV.add(vid);
+            } else if (op === "data_hidevariable") {
+              // hidden only
+            } else {
+              if (isStr(vid)) readV.add(vid);
+            }
+          }
+
+          // List references
+          if (fields.LIST) {
+            const fv = fields.LIST;
+            const lname = fv[0];
+            const lid = fv[1];
+
+            if (LIST_WRITE_OPS.has(op)) {
+              if (isStr(lid)) writeL.add(lid);
+            } else if (op === "data_showlist") {
+              if (isStr(lid)) showL.add(lid);
+            } else if (op === "data_hidelist") {
+              // hidden only
+            } else {
+              if (isStr(lid)) readL.add(lid);
+            }
+          }
+
+          // Top-level reporters
+          if (blk.topLevel === true) {
+            if (op === "data_variable") {
+              const fv = fields.VARIABLE;
+              if (fv && isStr(fv[1])) standaloneV.add(fv[1]);
+            } else if (op === "data_listcontents") {
+              const fv = fields.LIST;
+              if (fv && isStr(fv[1])) standaloneL.add(fv[1]);
+            }
+          }
+        }
+      }
+
+      // Monitor references
+      for (const mon of (isArr(monitors) ? monitors : [])) {
+        if (!isDict(mon)) continue;
+        const op = mon.opcode;
+        const params = mon.params || {};
+
+        if (op === "data_variable") {
+          const mid = mon.id;
+          if (isStr(mid)) showV.add(mid);
+        } else if (op === "data_listcontents") {
+          const mid = mon.id;
+          if (isStr(mid)) showL.add(mid);
+        }
+      }
+
+      // Remove write-only variables
+      for (const tgt of targets) {
+        if (!isDict(tgt)) continue;
+        if (isDict(tgt.variables)) {
+          for (const [id, ent] of Object.entries(tgt.variables)) {
+            const name = isArr(ent) && ent.length ? ent[0] : String(ent);
+            const isCloud = isStr(name) && name.startsWith(CLOUD_PREFIX);
+
+            if (isCloud) continue; // Never remove cloud variables
+            if (readV.has(id) || showV.has(id) || standaloneV.has(id)) continue; // Not write-only
+            if (!writeV.has(id)) continue; // Not written to at all
+
+            delete tgt.variables[id];
+            st.writeonly_vars_removed += 1;
+          }
+        }
+
+        // Remove write-only lists
+        if (isDict(tgt.lists)) {
+          for (const [id, ent] of Object.entries(tgt.lists)) {
+            if (readL.has(id) || showL.has(id) || standaloneL.has(id)) continue; // Not write-only
+            if (!writeL.has(id)) continue; // Not written to at all
+
+            delete tgt.lists[id];
+            st.writeonly_lists_removed += 1;
+          }
+        }
+      }
+    }
+
+    // ------------------------------------------------------------------
+    // Proposal 4: Normalize types and representations
+    _normalizeTypes(project) {
+      const st = this.stats;
+
+      // Remove md5ext from costumes and sounds
+      for (const tgt of project.targets) {
+        if (!isDict(tgt)) continue;
+
+        if (isArr(tgt.costumes)) {
+          for (const c of tgt.costumes) {
+            if (isDict(c) && has(c, "md5ext")) {
+              delete c.md5ext;
+              st.md5ext_removed += 1;
+            }
+          }
+        }
+
+        if (isArr(tgt.sounds)) {
+          for (const s of tgt.sounds) {
+            if (isDict(s) && has(s, "md5ext")) {
+              delete s.md5ext;
+              st.md5ext_removed += 1;
+            }
+          }
+        }
+      }
+
+      // Normalize numeric strings to numbers in variables and lists
+      for (const tgt of project.targets) {
+        if (!isDict(tgt)) continue;
+
+        if (isDict(tgt.variables)) {
+          for (const [id, ent] of Object.entries(tgt.variables)) {
+            if (!isArr(ent) || !ent.length) continue;
+            const val = ent[1];
+            if (isStr(val)) {
+              const num = Number(val);
+              if (!Number.isNaN(num) && String(num) === val) {
+                ent[1] = num;
+                st.numeric_strings_normalized += 1;
+              }
+            }
+          }
+        }
+
+        if (isDict(tgt.lists)) {
+          for (const [id, ent] of Object.entries(tgt.lists)) {
+            if (!isArr(ent) || !ent.length) continue;
+            const arr = ent[1];
+            if (isArr(arr)) {
+              for (let i = 0; i < arr.length; i++) {
+                const val = arr[i];
+                if (isStr(val)) {
+                  const num = Number(val);
+                  if (!Number.isNaN(num) && String(num) === val) {
+                    arr[i] = num;
+                    st.numeric_strings_normalized += 1;
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+
+      // Clear meta.agent (already done in _processRoot, but count here if normalizeTypes is enabled)
+      const meta = project.meta;
+      if (isDict(meta) && has(meta, "agent")) {
+        delete meta.agent;
+        st.meta_agent_cleared += 1;
       }
     }
 
