@@ -42,7 +42,9 @@ Each tool has an English page and a Japanese page (`…/ja/`). Use `docs/sb3/`,
   hidden monitors, which frees their stores for shortening and removal.
 - **Drop** default-valued fields the VM restores, hidden input defaults, unused
   variables and lists, unreachable blocks/comments, uncalled definitions, and
-  dead broadcasts.
+  dead broadcasts. The stage comment TurboWarp reads for its advanced settings
+  (the one ending in `// _twconfig_`) is never dropped, even when comment
+  stripping is on.
 - **Restructure** repeated or near-duplicate code into shared custom blocks,
   consecutive repeats into `repeat` loops, empty `if-else` into `if`, identical
   reporters within one script into temporary variables, and single-use non-warp

@@ -1039,6 +1039,73 @@ check(keptS2.variables.spriteTwoLocal000001 &&
 check(!namesOfStores(keptScope.stage.variables).includes("A"),
   "the stage reused a sprite's kept local variable name");
 
+/*
+ * 6. TurboWarp's "store settings in project" comment.  runtime.js looks on the
+ *    stage for a comment whose text includes " // _twconfig_" and parses the
+ *    JSON on the line before the marker.  Deleting it would silently reset the
+ *    project's framerate, stage size, interpolation, and other settings, so
+ *    neither comment stripping nor unreachable-code removal may drop it, even
+ *    when the block it was anchored to disappears.  Ordinary comments must
+ *    still be removed as before.
+ */
+const TW_CONFIG_TEXT = '{"framerate":60,"stageWidth":640} // _twconfig_';
+
+function buildTwConfigProject() {
+  return {
+    targets: [{
+      isStage: true, name: "Stage",
+      variables: {}, lists: {}, broadcasts: {},
+      blocks: {
+        // Kept: a hat that is reachable but does nothing.
+        flag: blk("event_whenflagclicked", { topLevel: true, x: 0, y: 0 }),
+        // Removed: no hat, no parent, never referenced.
+        orphan: blk("motion_movesteps", {
+          inputs: { STEPS: [1, [4, "10"]] }, comment: "anchored"
+        })
+      },
+      comments: {
+        cfg: {
+          blockId: "orphan", x: 1, y: 2, width: 300, height: 160,
+          minimized: false, text: TW_CONFIG_TEXT
+        },
+        notes: {
+          blockId: null, x: 3, y: 4, width: 200, height: 120,
+          minimized: false, text: "a normal comment"
+        },
+        anchored: {
+          blockId: "orphan", x: 5, y: 6, width: 200, height: 120,
+          minimized: true, text: "a comment on a removed block"
+        }
+      },
+      costumes: [], sounds: []
+    }],
+    extensions: [], meta: { semver: "3.0.0" }
+  };
+}
+
+const twStripped = SB3.compressProject(buildTwConfigProject(),
+  new SB3.Options({ stripComments: true }), () => {});
+const twStage = twStripped.project.targets[0];
+const twComments = twStage.comments || {};
+check(!!twComments.cfg, "stripping comments deleted TurboWarp's _twconfig_ comment");
+check(twComments.cfg && twComments.cfg.text === TW_CONFIG_TEXT,
+  "TurboWarp's _twconfig_ comment text was rewritten");
+check(twComments.cfg && twComments.cfg.blockId === null,
+  "TurboWarp's _twconfig_ comment still points at a removed block");
+check(!twComments.notes && !twComments.anchored,
+  `ordinary comments survived comment stripping (${JSON.stringify(Object.keys(twComments))})`);
+check(twStripped.stats.comments_removed === 1,
+  `comment stripping counted the preserved config comment (${twStripped.stats.comments_removed})`);
+check(!(twStage.blocks || {}).orphan, "the unreachable block was kept");
+const noStripTw = SB3.compressProject(buildTwConfigProject(), new SB3.Options({}), () => {});
+const noStripComments = noStripTw.project.targets[0].comments || {};
+check(!!noStripComments.cfg && noStripComments.cfg.text === TW_CONFIG_TEXT,
+  "unreachable-code removal deleted TurboWarp's _twconfig_ comment");
+check(noStripComments.cfg && noStripComments.cfg.blockId === null,
+  "the config comment was not detached from its removed block");
+check(!!noStripComments.notes, "a detached ordinary comment was dropped without stripComments");
+check(!noStripComments.anchored, "a comment on a removed block survived unreachable-code removal");
+
 if (failures) {
   console.error(`\n${failures} check(s) failed`);
   process.exit(1);

@@ -90,6 +90,30 @@
   const isStr = (v) => typeof v === "string";
   const isInt = (v) => typeof v === "number" && Number.isInteger(v);
   const has = (o, k) => Object.prototype.hasOwnProperty.call(o, k);
+
+  // TurboWarp keeps its advanced-settings overrides in a comment on the stage:
+  // one line holds JSON followed by " // _twconfig_" (runtime.js looks for a
+  // line that ends with that marker).  The comment is project data, not
+  // documentation, so removing it would silently reset the framerate, stage
+  // size, interpolation, and every other setting the project relies on.
+  const TW_CONFIG_MAGIC = " // _twconfig_";
+  const isTwConfigComment = (tgt, comment) =>
+    isDict(tgt) && !!tgt.isStage && isDict(comment) && isStr(comment.text) &&
+    comment.text.includes(TW_CONFIG_MAGIC);
+
+  // A comment survives when it is the TurboWarp config or when the block it is
+  // anchored to survived.  A config comment that lost its anchor is detached
+  // rather than dropped: TurboWarp reads it straight from the target's comment
+  // table and no block is needed.
+  const commentSurvives = (tgt, comment, blocks) => {
+    if (isTwConfigComment(tgt, comment)) {
+      if (isStr(comment.blockId) && !has(blocks, comment.blockId)) comment.blockId = null;
+      return true;
+    }
+    const anchor = comment.blockId;
+    return anchor === null || anchor === undefined || !isStr(anchor) || has(blocks, anchor);
+  };
+
   const deepCopy = (v) => {
     if (typeof structuredClone === "function") return structuredClone(v);
     return JSON.parse(JSON.stringify(v));
@@ -1181,9 +1205,7 @@
           const out = {};
           for (const [cid, c] of Object.entries(comments)) {
             if (!isDict(c)) continue;
-            const anchor = c.blockId;
-            if (anchor === null || anchor === undefined || !isStr(anchor)) out[cid] = c;
-            else if (has(kept, anchor)) out[cid] = c;
+            if (commentSurvives(tgt, c, kept)) out[cid] = c;
           }
           st.unreachable_comments_removed += Object.keys(comments).length - Object.keys(out).length;
           tgt.comments = out;
@@ -1633,9 +1655,7 @@
         const out = {};
         for (const [cid, c] of Object.entries(comments)) {
           if (!isDict(c)) continue;
-          const anchor = c.blockId;
-          if (anchor === null || anchor === undefined || !isStr(anchor)) out[cid] = c;
-          else if (has(finalBlocks, anchor)) out[cid] = c;
+          if (commentSurvives(tgt, c, finalBlocks)) out[cid] = c;
         }
         tgt.comments = out;
       }
@@ -2557,7 +2577,9 @@
       for (const [id, com] of Object.entries(tgt.comments)) {
         if (!isDict(com)) continue;
         const anchor = com.blockId;
-        if (isStr(anchor) && !has(tgt.blocks, anchor)) delete tgt.comments[id];
+        if (!isStr(anchor) || has(tgt.blocks, anchor)) continue;
+        if (isTwConfigComment(tgt, com)) com.blockId = null;
+        else delete tgt.comments[id];
       }
     }
 
@@ -4476,13 +4498,23 @@
 
     _stripComments(tgt) {
       const st = this.stats;
+      let keptIds = new Set();
       if (isDict(tgt.comments)) {
-        st.comments_removed += Object.keys(tgt.comments).length;
-        delete tgt.comments;
+        const kept = {};
+        for (const [cid, c] of Object.entries(tgt.comments)) {
+          if (!isTwConfigComment(tgt, c)) continue;
+          kept[cid] = c;
+          keptIds.add(cid);
+        }
+        st.comments_removed += Object.keys(tgt.comments).length - keptIds.size;
+        if (keptIds.size) tgt.comments = kept;
+        else delete tgt.comments;
       }
       if (isDict(tgt.blocks)) {
         for (const blk of Object.values(tgt.blocks)) {
-          if (isDict(blk) && has(blk, "comment")) delete blk.comment;
+          if (!isDict(blk) || !has(blk, "comment")) continue;
+          if (keptIds.has(blk.comment)) continue;
+          delete blk.comment;
         }
       }
     }
