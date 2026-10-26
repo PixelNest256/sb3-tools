@@ -39,7 +39,9 @@ Each tool has an English page and a Japanese page (`…/ja/`). Use `docs/sb3/`,
   reporters within one script into temporary variables, and single-use non-warp
   definitions inline. Reporters that read the clock, the date, the keyboard, the
   mouse, or another sprite are only cached inside a "run without screen refresh"
-  definition.
+  definition. A subtree containing a `control_stop` ("stop this script" or
+  "stop other scripts in sprite") is never moved into a shared block, so the
+  stop keeps its original scope.
 - **Fold** constant arithmetic and propagate stores that never change.
 - **Minify** the JSON and repack the zip.
 

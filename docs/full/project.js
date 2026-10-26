@@ -3680,6 +3680,18 @@
         for (const cand of starts) {
           const sub = this._collectSubgraph(blocks, cand, false);
           if (setHasIntersection(sub, used)) continue;
+          let forbidden = false;
+          for (const cid of sub) {
+            const cb = blocks[cid];
+            if (!isDict(cb)) continue;
+            const cop = cb.opcode;
+            if (!isStr(cop) || EXTRACT_FORBIDDEN_OPS.has(cop) ||
+                Compressor._isHatOpcode(cop)) {
+              forbidden = true;
+              break;
+            }
+          }
+          if (forbidden) continue;
           selected.push(cand);
           addAll(used, sub);
           info.push([cand, sub]);

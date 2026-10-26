@@ -22,7 +22,9 @@
  *      in the generated procedure;
  *   6. `shortenIds` and `renameStores` are independent: shortening ids can
  *      leave every visible name (variables, lists, messages, custom blocks,
- *      arguments) exactly as it was.
+ *      arguments) exactly as it was;
+ *   7. near-duplicate merging never moves a `control_stop` into the generated
+ *      procedure, where "stop this script" would only end the procedure.
  *
  * Invariants 1-3 were broken by "remove legacy mutation keys"; 4 by clearing
  * every overwritten value; 5 by "shorten internal IDs" and by near-duplicate
@@ -608,6 +610,120 @@ check(merged.stats.near_duplicates_extracted >= 1,
   }
   check(reportersInGeneratedBodies >= 1,
     "the merged procedure did not keep its argument reporter (the nested chain was not parametrised)");
+}
+
+// 3. Near-duplicate merging must not move `control_stop` into a generated
+//    procedure.  A "stop this script" inside the generated definition stops
+//    that procedure and returns to the caller, so the code after the call runs
+//    instead of being skipped.  Scripts whose copied subtree contains a stop
+//    therefore have to stay inline, while stop-free look-alikes must still
+//    merge (otherwise the guard would disable the whole feature).
+function buildStopMergeProject() {
+  const blocks = {};
+  const addScript = (tag, y, stopOption) => {
+    const hat = `stopHat${tag}`;
+    const root = `stopIf${tag}`;
+    const cond = `stopEq${tag}`;
+    const first = `stopSay${tag}1`;
+    blocks[hat] = blk("event_whenflagclicked", {
+      topLevel: true, x: 0, y, next: root
+    });
+    blocks[root] = blk("control_if", {
+      parent: hat,
+      inputs: { CONDITION: [2, cond], SUBSTACK: [2, first] }
+    });
+    blocks[cond] = blk("operator_equals", {
+      parent: root,
+      inputs: { OPERAND1: [1, [10, tag]], OPERAND2: [1, [10, "x"]] }
+    });
+    let prev = null;
+    for (let i = 1; i <= 12; i++) {
+      const id = `stopSay${tag}${i}`;
+      blocks[id] = blk("looks_say", {
+        parent: prev || root,
+        inputs: { MESSAGE: [1, [10, tag + i]] }
+      });
+      if (prev) blocks[prev].next = id;
+      prev = id;
+    }
+    if (stopOption) {
+      const sid = `stopBlock${tag}`;
+      blocks[prev].next = sid;
+      blocks[sid] = blk("control_stop", {
+        parent: prev, fields: { STOP_OPTION: [stopOption, null] }
+      });
+    }
+  };
+  addScript("A", 0, "this script");
+  addScript("B", 500, "this script");
+  addScript("E", 2000, "other scripts in sprite");
+  addScript("F", 2500, "other scripts in sprite");
+  addScript("C", 1000, null);
+  addScript("D", 1500, null);
+  return {
+    targets: [{
+      isStage: false, name: "Sprite1",
+      variables: {}, lists: {}, broadcasts: {},
+      blocks,
+      comments: {},
+      currentCostume: 0,
+      costumes: [{
+        name: "c", dataFormat: "svg", assetId: "0".repeat(32),
+        md5ext: "0".repeat(32) + ".svg", bitmapResolution: 1,
+        rotationCenterX: 10, rotationCenterY: 10
+      }],
+      sounds: [], volume: 100, layerOrder: 0, visible: true, x: 0, y: 0, size: 100,
+      direction: 90, draggable: false, rotationStyle: "all around"
+    }],
+    monitors: [], extensions: [], meta: { semver: "3.0.0" }
+  };
+}
+
+const stopMerged = SB3.compressProject(buildStopMergeProject(), new SB3.Options({
+  nearDuplicates: true,
+  shortenIds: false,
+  compressProcs: false,
+  extractDuplicates: false,
+  removeUnused: false
+}), () => {});
+{
+  const blocks = stopMerged.project.targets[0].blocks;
+  let totalStops = 0;
+  let stopsInGeneratedBodies = 0;
+  let generatedBodies = 0;
+  for (const b of Object.values(blocks)) {
+    if (!b || Array.isArray(b) || b.opcode !== "control_stop") continue;
+    totalStops += 1;
+  }
+  for (const def of Object.values(blocks)) {
+    if (!def || Array.isArray(def) || def.opcode !== "procedures_definition") continue;
+    const cb = (def.inputs || {}).custom_block;
+    const proto = blocks[Array.isArray(cb) ? cb[1] : null];
+    const code = (proto && proto.mutation && proto.mutation.proccode) || "";
+    if (!code.startsWith("ndup")) continue;
+    generatedBodies += 1;
+    const stack = [def.next];
+    const seen = new Set();
+    while (stack.length) {
+      const cur = stack.pop();
+      if (typeof cur !== "string" || seen.has(cur)) continue;
+      const b = blocks[cur];
+      if (!b || Array.isArray(b)) continue;
+      seen.add(cur);
+      if (b.opcode === "control_stop") stopsInGeneratedBodies += 1;
+      for (const entry of Object.values(b.inputs || {})) {
+        if (!Array.isArray(entry)) continue;
+        for (let i = 1; i < entry.length; i++) if (typeof entry[i] === "string") stack.push(entry[i]);
+      }
+      if (typeof b.next === "string") stack.push(b.next);
+    }
+  }
+  check(totalStops === 4,
+    `a control_stop block was lost or duplicated (found ${totalStops}, expected 4)`);
+  check(stopsInGeneratedBodies === 0,
+    `a control_stop was moved into a generated procedure (${stopsInGeneratedBodies} found)`);
+  check(generatedBodies >= 1,
+    "the stop-free near-duplicate fixture did not merge anything (test no longer exercises the merge path)");
 }
 
 if (failures) {
