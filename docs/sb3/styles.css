@@ -1077,6 +1077,8 @@ h1 {
 .footer strong { color: var(--ink); font-weight: 600; }
 .footer-links { display: flex; flex-wrap: wrap; gap: 4px 10px; }
 .footer-links a { color: var(--ink); }
+.footer-links .footer-feedback { color: var(--ink-soft); }
+.footer-links .footer-feedback:hover { color: var(--signal-dark); }
 
 /* ------------------------------------------------- Japanese typography */
 
