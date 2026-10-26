@@ -289,7 +289,6 @@
   };
 
   var projectInputs = Array.prototype.slice.call(document.querySelectorAll("input[data-popt]"));
-  var projectNumberInputs = Array.prototype.slice.call(document.querySelectorAll("input[data-popt-number]"));
   var strengthButtons = Array.prototype.slice.call(document.querySelectorAll("button[data-strength]"));
   var themeButtons = Array.prototype.slice.call(document.querySelectorAll("button[data-theme-set]"));
 
@@ -334,23 +333,10 @@
     try { localStorage.setItem(key, JSON.stringify(value)); } catch (_) { /* ignore */ }
   }
 
-  function clampPasses(value) {
-    var n = parseInt(value, 10);
-    if (!Number.isFinite(n)) return 1;
-    return Math.max(1, Math.min(10, n));
-  }
-  function readProjectNumber(input) {
-    var n = clampPasses(input.value);
-    input.value = String(n);
-    return n;
-  }
   function readProjectOptions() {
     var out = {};
     projectInputs.forEach(function (input) {
       out[input.getAttribute("data-popt")] = input.checked;
-    });
-    projectNumberInputs.forEach(function (input) {
-      out[input.getAttribute("data-popt-number")] = readProjectNumber(input);
     });
     return out;
   }
@@ -359,16 +345,10 @@
       var key = input.getAttribute("data-popt");
       input.checked = values[key] === true;
     });
-    projectNumberInputs.forEach(function (input) {
-      var key = input.getAttribute("data-popt-number");
-      var value = typeof values[key] === "number" ? values[key] : 1;
-      input.value = String(clampPasses(value));
-    });
   }
   function defaultProjectOptions() {
     var out = {};
     PROJECT_KEYS.forEach(function (key) { out[key] = true; });
-    out.repeatPasses = 1;
     return out;
   }
 
@@ -987,14 +967,6 @@
 
   projectInputs.forEach(function (input) {
     input.addEventListener("change", function () {
-      saveJSON(PROJECT_KEY, readProjectOptions());
-      if (running) staleAfterRun = true; else markStale();
-    });
-  });
-
-  projectNumberInputs.forEach(function (input) {
-    input.addEventListener("change", function () {
-      readProjectNumber(input);
       saveJSON(PROJECT_KEY, readProjectOptions());
       if (running) staleAfterRun = true; else markStale();
     });

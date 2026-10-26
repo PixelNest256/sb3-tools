@@ -222,13 +222,11 @@
   // ------------------------------------------------------------------
   class CompressError extends Error {}
 
-  const MAX_REPEAT_PASSES = 10;
-
-  function clampRepeatPasses(value) {
-    const n = Number(value);
-    if (!Number.isFinite(n)) return 1;
-    return Math.max(1, Math.min(MAX_REPEAT_PASSES, Math.trunc(n)));
-  }
+  // The three restructuring steps below are cheap enough to re-run on the
+  // rewritten code: each pass may expose new duplicate groups or reporter
+  // candidates.  Repetition stops as soon as a pass changes nothing or the
+  // hard cap is reached.
+  const MAX_OPTIMIZATION_PASSES = 10;
 
   const DEFAULT_OPTIONS = {
     stripDefaults: true,
@@ -250,7 +248,6 @@
     loopDuplicates: true,
     propagateConstants: true,
     reuseReporters: true,
-    repeatPasses: 1,
     stripComments: false,
     compactWorkspace: false
   };
@@ -260,9 +257,7 @@
       Object.assign(this, DEFAULT_OPTIONS);
       if (isDict(values)) {
         for (const key of Object.keys(DEFAULT_OPTIONS)) {
-          if (!(key in values)) continue;
-          if (key === "repeatPasses") this[key] = clampRepeatPasses(values[key]);
-          else this[key] = !!values[key];
+          if (key in values) this[key] = !!values[key];
         }
       }
     }
@@ -291,7 +286,8 @@
         const_vars_inlined: 0, const_reads_inlined: 0,
         arg_ids_shortened: 0, mutation_keys_added: 0, monitors_removed: 0,
         dead_hide_blocks_removed: 0,
-        comments_removed: 0, workspace_compacted: 0, float_values_rounded: 0
+        comments_removed: 0, workspace_compacted: 0, float_values_rounded: 0,
+        optimization_passes: 0
       };
       this.varMap = new Map();
       this.listMap = new Map();
@@ -373,45 +369,69 @@
 
       this.layerExpect = 0;
       const n = targets.length;
-      const repeats = (o.extractDuplicates || o.nearDuplicates || o.reuseReporters) ?
-        clampRepeatPasses(o.repeatPasses) : 1;
-      for (let pass = 0; pass < repeats; pass++) {
+      // Re-running the cheap restructure steps is part of the option itself:
+      // keep going while a pass still finds something (or the 10-pass cap is
+      // reached).  A project where the first pass leaves nothing behind is
+      // therefore processed exactly once, as before.
+      const extra = o.extractDuplicates || o.nearDuplicates || o.reuseReporters;
+      const maxPasses = extra ? MAX_OPTIMIZATION_PASSES : 1;
+      let pass = 0;
+      const frac = (within) => (extra ? 1 - 1 / (pass + 1 + within) : within);
+      while (pass < maxPasses) {
+        if (this.cancelled()) throw new Error("Cancelled");
         const label = pass === 0
           ? null
-          : `Repeating optimizations (pass ${pass + 1}/${repeats})...`;
+          : `Repeating optimizations (pass ${pass + 1})...`;
+        const before = this._optimizationSignature();
         for (let i = 0; i < n; i++) {
           if (this.cancelled()) throw new Error("Cancelled");
           const text = label || `Processing target ${i + 1}/${n}`;
-          this.progress("targets", (pass + i / n) / repeats, text);
+          this.progress("targets", frac(i / n), text);
           if (pass === 0) this._processTarget(targets[i]);
           else this._extractTargetDuplicates(targets[i]);
-          this.progress("targets", (pass + (i + 1) / n) / repeats, text);
+          this.progress("targets", frac((i + 1) / n), text);
         }
         if (o.reuseReporters) {
-          this.progress("targets", (pass + 1) / repeats,
+          this.progress("targets", frac(1),
             label || "Reusing repeated reporter values...");
           this._reuseReporters(targets);
         }
         // The blocks reporter reuse inserts are only normalised on the extra
         // passes.  The first pass keeps the historical order exactly, so a
         // project without leftover candidates serialises byte-for-byte the
-        // same as before this option existed.
+        // same as before this repetition existed.
         if (pass > 0) {
           for (const tgt of targets) {
             if (this.cancelled()) throw new Error("Cancelled");
             this._finalizeTargetBlocks(tgt, false);
           }
         }
+        const changed = this._optimizationSignature() !== before;
+        pass += 1;
+        if (!changed) break;
       }
-      if (repeats > 1 && o.compactWorkspace) {
+      this.stats.optimization_passes = pass;
+      if (pass > 1 && o.compactWorkspace) {
         for (const tgt of targets) this._compactWorkspace(tgt);
       }
+      if (extra) this.progress("targets", 1.0, "Optimizations complete");
       if (this.cancelled()) throw new Error("Cancelled");
       this.progress("finalize", 0.5, "Processing monitors and metadata...");
       this._processMonitors(project);
       this._processRoot(project);
       this.progress("finalize", 1.0, "Done");
       return project;
+    }
+
+    // Total of the counters the repeatable steps touch.  If a pass leaves it
+    // unchanged there is nothing left to find, so the outer loop can stop
+    // instead of rescanning every target.
+    _optimizationSignature() {
+      const st = this.stats;
+      return st.duplicates_extracted + st.dup_blocks_saved +
+        st.near_duplicates_extracted + st.near_blocks_saved +
+        st.reporter_values_cached + st.reporter_uses_reused +
+        st.temp_vars_created;
     }
 
     // ------------------------------------------------------------------

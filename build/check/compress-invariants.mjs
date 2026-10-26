@@ -727,12 +727,15 @@ const stopMerged = SB3.compressProject(buildStopMergeProject(), new SB3.Options(
 }
 
 /*
- * 4. Advanced pass repetition.  Reporter reuse applies at most 30 groups per
- *    call, so a target with more candidates only finishes on a later pass.
- *    The fixture below has enough independent reporters to prove that
- *    `repeatPasses: 2` caches more (and serializes smaller) than one pass.
- *    Exact and near-duplicate extraction have their own internal 200-group
- *    caps, which the same outer loop covers.
+ * 4. Automatic repetition of the cheap restructure steps.  Reporter reuse
+ *    applies at most 30 groups per call, so a target with more candidates only
+ *    finishes on a later pass.  The fixture below has enough independent
+ *    reporters to prove that the loop keeps going on its own: a single
+ *    compressProject() call must cache more than 30 groups.  Exact and
+ *    near-duplicate extraction have their own internal 200-group caps, which
+ *    the same outer loop covers.  A second compression of the result must be a
+ *    fixed point, and turning the three steps off must keep the loop at one
+ *    pass.
  */
 function buildRepeatReporterProject() {
   const VID = "variableLongIdForRepeatTest01";
@@ -801,22 +804,27 @@ const repeatBase = {
   compressProcs: false,
   keepMonitors: false
 };
-const onePass = SB3.compressProject(buildRepeatReporterProject(), new SB3.Options(
-  Object.assign({}, repeatBase, { repeatPasses: 1 })), () => {});
-const twoPasses = SB3.compressProject(buildRepeatReporterProject(), new SB3.Options(
-  Object.assign({}, repeatBase, { repeatPasses: 2 })), () => {});
-audit(twoPasses.project);
-check(twoPasses.stats.reporter_values_cached > onePass.stats.reporter_values_cached,
-  "a second advanced pass did not reuse the reporters left after the first pass");
-check(SB3.dumpsCompact(twoPasses.project).length <
-  SB3.dumpsCompact(onePass.project).length,
-  "a second advanced pass did not make the project smaller");
-check(new SB3.Options({ repeatPasses: 0 }).repeatPasses === 1,
-  "repeatPasses below 1 was not clamped");
-check(new SB3.Options({ repeatPasses: 99 }).repeatPasses === 10,
-  "repeatPasses above 10 was not clamped");
-check(new SB3.Options({ repeatPasses: "3" }).repeatPasses === 3,
-  "a numeric string was not accepted for repeatPasses");
+const autoOnce = SB3.compressProject(buildRepeatReporterProject(), new SB3.Options(repeatBase), () => {});
+const autoTwice = SB3.compressProject(autoOnce.project, new SB3.Options(repeatBase), () => {});
+audit(autoOnce.project);
+audit(autoTwice.project);
+check(autoOnce.stats.reporter_values_cached > 30,
+  "automatic repetition stopped after a single reporter-reuse call");
+check(autoOnce.stats.optimization_passes >= 2,
+  "the reporter fixture did not need a second pass");
+check(autoOnce.stats.optimization_passes <= 10,
+  "automatic repetition ran more than the 10-pass cap");
+check(SB3.dumpsCompact(autoTwice.project).length ===
+  SB3.dumpsCompact(autoOnce.project).length,
+  "compressing the result again still found savings (the loop stopped early)");
+check(autoTwice.stats.optimization_passes === 1,
+  "a fixed point still needed more than one pass");
+const repeatOff = SB3.compressProject(buildRepeatReporterProject(), new SB3.Options(
+  Object.assign({}, repeatBase, {
+    extractDuplicates: false, nearDuplicates: false, reuseReporters: false
+  })), () => {});
+check(repeatOff.stats.optimization_passes === 1,
+  "the loop ran extra passes with all three repeatable steps disabled");
 
 if (failures) {
   console.error(`\n${failures} check(s) failed`);

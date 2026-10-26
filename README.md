@@ -42,10 +42,10 @@ Each tool has an English page and a Japanese page (`…/ja/`). Use `docs/sb3/`,
   definition. A subtree containing a `control_stop` ("stop this script" or
   "stop other scripts in sprite") is never moved into a shared block, so the
   stop keeps its original scope.
-- **Repeat** the advanced restructure passes — duplicate extraction,
-  near-duplicate merging, and reporter reuse — 1 to 10 times with the
-  "advanced optimization passes" option. Each pass can expose savings in code
-  rewritten by the previous one; the default is 1 (no extra repetition).
+- **Repeat** duplicate extraction, near-duplicate merging, and reporter reuse
+  automatically: those steps re-run on the rewritten code until a pass finds
+  nothing new (at most 10 passes). Each pass can expose savings left behind by
+  the previous one.
 - **Fold** constant arithmetic and propagate stores that never change.
 - **Minify** the JSON and repack the zip.
 
