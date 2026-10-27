@@ -318,6 +318,33 @@ check(keptTarget.lists && keptTarget.lists[LID_DEAD] && keptTarget.lists[LID_DEA
 check(Object.keys(keptTarget.variables || {}).length === 2, "keeping monitors preserved a variable it should not have");
 
 /*
+ * stripDefaults must leave a type-correct cached value on every monitor. A
+ * monitor shown from a script during a step is rendered from this cache before
+ * its monitor block has run; with a null value TurboWarp's list monitor throws
+ * on `value.length`, the Monitors error boundary unmounts, and every monitor
+ * disappears while the project keeps running.
+ */
+const stripProject = buildProject();
+stripProject.monitors = [
+  { id: VID_COUNT, opcode: "data_variable", params: { VARIABLE: "count" }, spriteName: "Sprite1",
+    value: 42, x: 1, y: 2, visible: false, mode: "default", width: 0, height: 0,
+    sliderMin: 0, sliderMax: 100, isDiscrete: true },
+  { id: LID_DEAD, opcode: "data_listcontents", params: { LIST: "deadList" }, spriteName: "Sprite1",
+    value: ["a", "b"], x: 3, y: 4, visible: false, mode: "list", width: 0, height: 0 }
+];
+const stripped = SB3.compressProject(stripProject, onlyOptions(["stripDefaults"]), () => {});
+const strippedMons = stripped.project.monitors || [];
+const strippedVar = strippedMons.find((m) => m.opcode === "data_variable");
+const strippedList = strippedMons.find((m) => m.opcode === "data_listcontents");
+check(strippedVar && strippedVar.value === 0,
+  "stripDefaults dropped a scalar monitor's cached value (it must stay 0, not null)");
+check(strippedList && Array.isArray(strippedList.value) && strippedList.value.length === 0,
+  "stripDefaults dropped a list monitor's cached value (it must stay [], not null)");
+check(strippedVar && strippedVar.x === 1 && strippedVar.y === 2 &&
+  strippedList && strippedList.x === 3 && strippedList.y === 4,
+  "stripDefaults moved a monitor's saved position");
+
+/*
  * shortenIds owns ids; renameStores owns visible names. With the "no visible
  * change" mix (ids on, names off) every variable, list, message, custom block,
  * and argument name must survive untouched.

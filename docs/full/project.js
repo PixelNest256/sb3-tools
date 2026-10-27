@@ -5165,9 +5165,14 @@
           }
         }
         if (this.options.stripDefaults) {
-          // Only the cached value and the default-valued fields go; `x`/`y`
-          // (the monitor's saved position) is never touched.
-          delete mon.value;
+          // The cached value cannot be dropped: a monitor shown from a script
+          // mid-step is rendered from this cache before its monitor block has
+          // run once, and a null value makes the list monitor throw
+          // (`value.length`), which unmounts the whole monitor layer. 0/[] are
+          // the exact placeholders TurboWarp writes when serializing monitors,
+          // so both are already known to be safe. `x`/`y` (the monitor's saved
+          // position) is never touched.
+          mon.value = (mon.opcode === "data_listcontents" || mon.mode === "list") ? [] : 0;
           for (const [key, dflt] of MONITOR_DEFAULTS) {
             if (has(mon, key) && looseEq(mon[key], dflt)) {
               delete mon[key];
