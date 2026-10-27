@@ -8,7 +8,7 @@
 
 - Scratch VM: `C:\Users\Kasam\AppData\Local\Temp\svm\node_modules\scratch-vm`
 - テストプロジェクト: `C:\Users\Kasam\Playground\sb3_compressor\test.sb3`
-- 現行実装: `docs/sb3/compressor.js` (SHA: a0c3a3e)
+- 現行実装: `docs/sb3/compressor.js`（提案1・2・4 実装後の作業ツリー。`docs/full/project.js` は同一内容）
 
 ## 確認点
 
@@ -38,28 +38,30 @@
 **検証結果**: ⚠️ 参照条件を考慮する必要あり
 
 **根拠**:
-- `looks_switchcostumeto` / `looks_switchbackdropto`: 名前で指定されたコスチュームを参照
-- `looks_nextcostume` / `looks_nextbackdrop`: 次のコスチュームを動的に参照（全コスチュームが必要）
-- `looks_costumenumbername` / `looks_backdropnumbername`: 現在のコスチューム名/番号を取得（動的参照）
-- `sensing_of` (costume # / costume name / backdrop # / backdrop name): スプライトプロパティとして参照
+- `looks_switchcostumeto` / `looks_switchbackdropto`: メニュー（shadow ブロック）のフィールドに書かれた名前を参照
+  - `next costume` / `previous costume`、`next backdrop` / `previous backdrop` / `random backdrop`、数値文字列（VM は名前で見つからなければインデックスとして解釈する）、レポーター（動的）は位置依存なので全コスチュームを保持
+  - 名前がリテラルのときだけ、そのコスチューム1枚に絞れる
+- `looks_nextcostume` / `looks_nextbackdrop`: 次のコスチューム/背景を動的に参照（全保持）。`looks_nextbackdrop` はスプライトから実行しても `getTargetForStage()` により Stage に作用する
+- `looks_costumenumbername` / `looks_backdropnumbername`: `NUMBER_NAME = number` は番号を返すためインデックスがずれないよう全保持。`name` は名前を返すだけなので保持不要
+- `event_whenbackdropswitchesto`: 指定した背景が存在しないと発火しないため、その背景を保持
+- `sensing_of`: `costume #` / `backdrop #` / `background #` は対象ターゲットの全コスチュームを保持。`costume name` / `backdrop name` は保持不要
+- コスチュームは各ターゲット最低1枚残す。削除後は `currentCostume` を名前で再ポイントする
 
 **ガード条件**:
-- ターゲットに `looks_nextcostume` または `looks_nextbackdrop` がある場合、全コスチュームを維持
-- ターゲットに `looks_costumenumbername` または `looks_backdropnumbername` がある場合、全コスチュームを維持
-- `sensing_of` で costume/backdrop プロパティを参照する場合、全コスチュームを維持
-- 現在のコスチューム（`currentCostume`）は常に使用中とみなす
-- `looks_switchcostumeto` / `looks_switchbackdropto` で指定された名前のコスチュームを維持
-- コスチューム番号インデックス `[number]` による参照がある場合、インデックスが変わるため除外
+- 動的メニュー（レポーター）、`next` / `previous` / `random`、数値文字列、未知の名前は「全保持」
+- 背景系は全ターゲット横断で判定する（スプライトの `next backdrop` は Stage の背景を進めるため）
 
 ### 検証: サウンドの参照条件
 
 **検証方法**: test.sb3 でサウンド参照ブロックをスキャン
 
-**検証結果**: ✅ 単純
+**検証結果**: ✅ 名前単位で判定可能
 
 **根拠**:
-- `sound_*` ブロック（`sound_play`, `sound_playuntildone`, `sound_setvolumeto`, `sound_changevolumeby`, `sound_sounds_menu`）が存在するターゲットのサウンドは全て維持
-- 上記ブロックが存在しないターゲットのサウンドは全削除可能
+- `sound_play` / `sound_playuntildone` は `SOUND_MENU` の名前だけを参照する。メニューがレポーターなら全保持
+- 名前が見つからない場合、VM は `parseInt(name, 10)` を 1-based インデックスとして使う（`wrapClamp`）。数値文字列は全保持
+- `sound_stopallsounds` / `sound_seteffectto` / `sound_changeeffectby` / `sound_cleareffects` / `sound_setvolumeto` / `sound_changevolumeby` / `sound_volume` は特定のサウンドを指さない
+- 未知の `sound_*` ブロックは安全側で全保持（メニューの shadow は実行されないので除外）
 
 ### 検証: スプライト削除の参照条件
 
@@ -70,19 +72,30 @@
 - `looks_touchingobject`: スプライトメニューで指定
 - `sensing_distanceto`: スプライトメニューで指定
 - `control_create_clone_of`: スプライトメニューで指定
-- `sensing_of` (OBJECT): スプライト名を動的に参照
+- `sensing_of` (OBJECT): スプライト名を参照
 - モニター: `spriteName` プロパティで参照
 
 **ガード条件**:
 - スクリプトが存在する場合、削除不可
 - `visible: false` で、上記ブロックから名前が参照されていない場合、削除可能
 - モニターから参照されている場合、削除不可
+- レポーターのメニュー（動的）がある場合は全スプライトを保持
+- 参照しているスプライトが消えると次が死ぬ連鎖があるため、不動点に達するまで繰り返す
 
-### 結論
+### 検証: zip 内アセットの削除
 
+**検証結果**: ✅ 実装可能
+
+**根拠**:
+- `project.json` からコスチューム/サウンドを消しても、zip 内のアセットファイルは残る
+- `assetId` + `dataFormat` が実体の参照。`md5ext` がある場合はそれも参照として扱う
+- `<32桁hex>.<拡張子>` の形のファイルだけを対象にし、`project.json` 以外の任意ファイルは保持する
+
+**結論**:
 - ✅ **実装可能**: 参照条件を適切に実装すれば安全
 - ⚠️ **注意点**: `looks_nextcostume` 等の動的参照を見落とすとバグの原因
-- 📊 **効果**: test.sb3 で Stage に未使用コスチューム4個（空白の名前）を検出
+- 📊 **効果**: test.sb3 で Stage の未使用コスチューム4個を削除（背景 5→1）。サウンド・スプライトの削除は 0
+- 🗜️ **zip 効果**: 削除したアセットのファイルも zip から消えるため、`project.json` だけでなく `.sb3` 自体も小さくなる
 
 ---
 
@@ -90,45 +103,52 @@
 
 ### 検証: sensing_of による変数参照
 
-**検証方法**: Scratch VM ソースコードで `sensing_of` の実装を確認
+**検証方法**: Scratch VM の `getAttributeOf` 実装を確認
 
-**検証結果**: ✅ 問題なし
+**検証結果**: ⚠️ **変数を読む**（当初の「3.0 では読めない」は誤り）
 
 **根拠**:
-- Scratch 3.0 の `sensing_of` (`getAttributeOf`) はスプライトプロパティのみを参照
-- 参照可能なプロパティ: x position, y position, direction, costume #, costume name, size, volume
-- **変数を直接参照することはできない**
-- Scratch 2.0 では変数参照が可能だったが、3.0 では削除されている
+- `scratch3_sensing.js` の `getAttributeOf` は、組み込みプロパティ（x position / y position / direction / costume # / costume name / size / volume / background # / backdrop # / backdrop name）に一致しない場合、最後に
+  `attrTarget.lookupVariableByNameAndType(args.PROPERTY, "", true)` を実行し、見つかった変数の値を返す（見つからなければ 0）
+- 第3引数 `skipStage = true` のため、読まれるのは **OBJECT ターゲット自身のローカル（スカラー）変数** だけ。スプライトから Stage のグローバル変数を同名で読むことはできない。OBJECT が `_stage_` のときは Stage 自身の変数が読まれる
+- したがって `sensing_of [<変数名>] of [...]` の `<変数名>` は「読み取り」として扱う必要がある（リストは対象外。`type = ""` はスカラー変数のみ）
+- 実装は名前が一致する変数 ID を保守的にすべて保持する（OBJECT がレポーターで動的な場合も安全）
 
-### 検証: test.sb3 での書き込み専用変数の検出
+### 検証: test.sb3 での書き込み専用ストアの検出
 
-**検証方法**: 現行実装の `used` 判定ロジックを再現し、書き込み専用を検出
+**検証方法**: 実装（`_scanUsage` の read/write 分類と `_removeWriteOnly`）で実際に圧縮し、削除されたストアを列挙
 
 **検証結果**:
-- Stage: 書き込み専用変数 2個
-- UI: 書き込み専用変数 23個
-- Chatbot: 書き込み専用変数 2個
+- Stage: 書き込み専用変数 **1個**（`Query`）
+- その他のターゲット: 0個
+- 書き込み専用リスト: 0個
+- 従来「Stage 2個 / UI 23個 / Chatbot 2個 = 27個」としていたのは、read/write の分類を誤った試算であり実測と一致しない
 
-**現行実装の問題**:
-- `used = intersect(used, union(read, write, show, visible, standalone))`
-- `write` も `used` に含まれるため、書き込み専用でも `used` になる
-- したがって、現行実装では書き込み専用変数は削除されない
+**修正前の実装の問題**:
+- 旧 `_removeWriteOnly` は分類を作り直しており、`sensing_of` を「参照しない」と誤認していた
+- モニターを ID ではなく名前で照合していたため、別スプライトの同名ローカル変数のモニターを巻き込む可能性があった
+- 連続する削除ブロックの再連結が不完全で、スクリプトが途中で切れる回帰があった（回帰テストで検出）
 
 ### ガード条件
 
-書き込み専用として安全に削除するには、以下を確認する必要がある:
-- ✅ 読み取り（`data_variable`, `data_listcontents`, `data_itemoflist`, etc.）がない
-- ✅ `sensing_of` で参照されていない（Scratch 3.0 では不可能）
-- ✅ モニター（`visible`）で表示されていない
+書き込み専用として安全に削除するには、以下を確認する:
+- ✅ 読み取り（`data_variable`, `data_listcontents`, `data_itemoflist`, `data_lengthoflist`, `data_listcontainsitem`, `data_itemnumoflist`）がない
+- ✅ `sensing_of` で名前参照される変数でない
+- ✅ 残すモニター（`removeMonitors=false`）が指すストアでない
 - ✅ クラウド変数でない（`☁` プレフィックス）
-- ✅ `show variable` / `show list` で表示されていない
+- ✅ `show variable` / `show list` で表示されていない（`hide` だけなら削除対象）
 - ✅ トップレベルレポーターではない
+- ✅ `control_for_each` のループ変数でない（VM は毎回 `lookupOrCreateVariable` するため、消しても同名で再作成される）
+- ✅ 削除するのは書き込み系＋`hide` ブロックのみ（C ブロックは削除しない）
+- ✅ 削除後に `next` / `parent` / `SUBSTACK` を再連結し、到達不能ブロックを掃除する
+- ✅ モニターの削除は ID 完全一致で行う
 
 ### 結論
 
-- ✅ **実装可能**: sensing_of による変数参照を考慮する必要はない（Scratch 3.0）
-- ⚠️ **現行実装変更**: `used` 判定から `write` を除外し、読み取りのみを「使用」とみなすロジックに変更
-- 📊 **効果**: test.sb3 で27個の書き込み専用変数を削除可能
+- ✅ **実装可能**: `sensing_of` の変数参照を読み取りとして扱えば安全
+- ⚠️ **修正内容**: `used` から `write` を除外し、読み取りのみを「使用」とみなす
+- 📊 **効果**: test.sb3 で書き込み専用変数 1個を削除（リスト 0個）
+- 📌 **補足**: `removeMonitors=true` のときは非表示モニター付きの空リスト（test.sb3 の Stage `logs`）も削除対象になる
 
 ---
 
@@ -178,6 +198,8 @@
 - ✅ **実装可能**: md5ext, meta.agent, 数値文字列正規化は安全
 - ✅ **既に実装済み**: 隠れシャドウ削除
 - 📊 **効果**: md5ext 削除でコスチューム/サウンド毎に約32B節約
+- 📊 **実測（test.sb3）**: md5ext 118件、数値文字列 126件、`meta.agent` 1件
+- 📌 **独立性**: `stripNullFieldIds`（フィールドの `[name, null]` → `[name]`、既定 ON）と `zeroTopLevelCoords`（既定 OFF）は `normalizeTypes` とは独立したオプション。以前は `normalizeTypes` の内側に入っており、`normalizeTypes` を切ると効かなかった（修正済み）
 
 ---
 
@@ -363,16 +385,26 @@
 
 提案ドキュメントの推奨優先順位（1・2・5・9）に基づき、検証状況を考慮:
 
-1. **提案1（デッドアセット除去）**: ✅ 検証済み、実装可能、効果大
-2. **提案2（書き込み専用除去）**: ✅ 検証済み、実装可能、効果中〜大
+1. **提案1（デッドアセット除去）**: ✅ 実装済み（`_removeDeadAssets` / `pruneAssetEntries`）、効果大
+2. **提案2（書き込み専用除去）**: ✅ 実装済み（`_removeWriteOnly`）、効果中
 3. **提案5（deflate意識最適化）**: ⏳ 未検証
 4. **提案9（正規化による重複検出強化）**: ⏳ 未検証
-5. **提案4（型・表現正規化）**: ✅ 検証済み、実装可能、効果小〜中
+5. **提案4（型・表現正規化）**: ✅ 実装済み（`_normalizeTypes` / `_stripNullFieldIds` / `_zeroTopLevelCoords`）、効果小〜中
 
-**推奨**: 提案1・2・4から実装を開始。提案5・9は実装が軽いので後回しでも可。
+**推奨**: 提案1・2・4は実装・検証済み。提案5・9は実装が軽いので後回しでも可。
+
+---
+
+## 実装後の検証
+
+- `build/check/compress-invariants.mjs`: 提案1・2・4の回帰テスト（不変条件、連続削除の再連結、C ブロック、ループ変数、`sensing_of` 変数、背景のクロスターゲット参照、スプライト名参照、zip アセット削除、モニター ID 一致）
+- `build/check/test-new-features.cjs`: `test.sb3` での実測（dead costumes 4 / dead sounds 0 / dead sprites 0 / write-only vars 1 / write-only lists 0 / md5ext 118 / 数値文字列 126）
+- Scratch VM でのロード検証: DEF / MAX / KEEP の3構成で、変数・リスト・ブロック参照の不整合 0
+- UI 検証（`/sb3/`, `/sb3/ja/`, `/full/`, `/full/ja/`）: ダウンロードしたプロジェクトの JSON サイズ・SHA256・モニター数を確認
 
 ---
 
 ## 検証日時
 
 - 2026-10-26: 確認点2, 提案1, 提案2, 提案4（一部）
+- 2026-10-27: 提案1・2・4の実装に合わせて是正（`sensing_of` の変数参照、書き込み専用の実測値、zip アセット削除、オプションの独立性）

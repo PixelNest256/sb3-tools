@@ -372,7 +372,7 @@
     }
 
     run(project) {
-      const targets = project.targets;
+      let targets = project.targets;
       if (!isArr(targets) || !targets.length) {
         throw new CompressError("'targets' not found. Please provide a project.json.");
       }
@@ -411,7 +411,8 @@
       }
       if (o.removeDeadAssets) {
         this.progress("collect", 1.0, "Removing dead assets...");
-        project.targets = this._removeDeadAssets(targets, project.monitors);
+        targets = this._removeDeadAssets(targets, project.monitors);
+        project.targets = targets;
       }
       if (o.removeWriteOnly) {
         this.progress("collect", 1.0, "Removing write-only variables and lists...");
@@ -420,6 +421,7 @@
       if (o.normalizeTypes) {
         this.progress("collect", 1.0, "Normalizing types and representations...");
         this._normalizeTypes(project);
+      }
       if (o.stripNullFieldIds) {
         this.progress("collect", 1.0, "Stripping null field IDs...");
         this._stripNullFieldIds(project.targets);
@@ -427,7 +429,6 @@
       if (o.zeroTopLevelCoords) {
         this.progress("collect", 1.0, "Zeroing top-level coordinates...");
         this._zeroTopLevelCoords(project);
-      }
       }
       if (o.shortenIds) {
         if (o.removeUnused) {
@@ -1124,7 +1125,7 @@
       blocksByTi.forEach((blocks, ti) => {
         for (const [bid, blk] of Object.entries(blocks)) {
           if (isArr(blk)) enqueue(ti, bid);
-          else if (isDict(blk) && blk.topLevel === true && isTopRoot(blk.opcode)) enqueue(ti, bid);
+          else if (isDict(blk) && (blk.topLevel === true || blk.parent == null) && isTopRoot(blk.opcode)) enqueue(ti, bid);
         }
       });
 
@@ -1212,6 +1213,9 @@
       targets.forEach((tgt, ti) => {
         if (!isDict(tgt)) return;
         const blocks = blocksByTi[ti];
+        if (Object.keys(blocks).length > 0 && reachable[ti].size === 0) {
+          for (const bid of Object.keys(blocks)) reachable[ti].add(bid);
+        }
         const kept = {};
         for (const [bid, blk] of Object.entries(blocks)) {
           if (reachable[ti].has(bid)) kept[bid] = blk;
@@ -4980,371 +4984,453 @@
 
     // ------------------------------------------------------------------
     // Proposal 1: Remove dead assets (costumes, sounds, sprites)
+    // ------------------------------------------------------------------
+    // Proposal 1: remove costumes, sounds and sprites nothing can use.
+    //
+    // Every reference is resolved the way scratch-vm resolves it, and every
+    // resolution that is not statically known keeps the whole list:
+    //   * `looks_switchcostumeto` / `looks_switchbackdropto` read the field of
+    //     the menu block they point at.  A reporter, a joined string, a numeric
+    //     index and `next` / `previous` / `random` are position dependent, so
+    //     they keep every costume; a plain name keeps just that costume;
+    //   * `looks_nextbackdrop` and the backdrop switches act on the Stage even
+    //     when a sprite runs them (`getTargetForStage`), and a
+    //     `when backdrop switches to [X]` hat needs X to exist;
+    //   * `sensing_of` resolves OBJECT to a target, and `costume #` /
+    //     `backdrop #` / `background #` report an index, so that target keeps
+    //     all of its costumes;
+    //   * `sound_play` / `sound_playuntildone` name their sound through the
+    //     menu; the other sound blocks work on the target as a whole;
+    //   * a sprite is kept while anything names it (monitor, `goto`, `touching`,
+    //     `distance to`, `create clone of`, `sensing_of`) or while a menu that
+    //     should name it is computed at run time.
     _removeDeadAssets(targets, monitors) {
       const st = this.stats;
-      const stageName = this.stageName;
+      const stage = targets.find((tgt) => isDict(tgt) && !!tgt.isStage) || null;
 
-      // Collect sprite name references
-      const referencedSpriteNames = new Set();
+      // Value of a dropdown input: the field of the menu block it points at, or
+      // null when the input is computed at run time (or is missing).
+      const menuFieldValue = (blocks, blk, key) => {
+        const entry = isDict(blk.inputs) ? blk.inputs[key] : null;
+        if (isArr(entry) && entry.length > 1) {
+          const ref = entry[1];
+          if (!isStr(ref)) return null;
+          const menu = blocks[ref];
+          const fv = isDict(menu) && isDict(menu.fields) ? menu.fields[key] : null;
+          return isArr(fv) && isStr(fv[0]) ? fv[0] : null;
+        }
+        const fv = isDict(blk.fields) ? blk.fields[key] : null;
+        return isArr(fv) && isStr(fv[0]) ? fv[0] : null;
+      };
+
+      const byName = new Map();
+      for (const tgt of targets) {
+        if (isDict(tgt) && isStr(tgt.name) && !byName.has(tgt.name)) byName.set(tgt.name, tgt);
+      }
+
+      const ALL_COSTUME_WORDS = new Set(["next costume", "previous costume"]);
+      const ALL_BACKDROP_WORDS = new Set(["next backdrop", "previous backdrop", "random backdrop"]);
+      const SPRITE_MENU_KEYS = new Set(["TO", "TOWARDS", "TOUCHINGOBJECTMENU",
+        "DISTANCETOMENU", "CLONE_OPTION", "OBJECT"]);
+      const SOUND_NO_MENU_OPS = new Set(["sound_stopallsounds", "sound_seteffectto",
+        "sound_changeeffectby", "sound_cleareffects", "sound_setvolumeto",
+        "sound_changevolumeby", "sound_volume"]);
+      // `_setCostume` tries a name first and then casts to a number, so a
+      // numeric string is an index as well; the slot it lands on must not move.
+      const isIndexLike = (name) => isStr(name) && name.trim() !== "" &&
+        Number.isFinite(Number(name));
+
+      const analyze = (list) => {
+        const refs = {
+          allCostumes: new Set(), allSounds: new Set(),
+          costumes: new Map(), sounds: new Map(),
+          sprites: new Set(), dynamicSprites: false
+        };
+        const wantCostume = (tgt, name) => {
+          if (!isDict(tgt) || !isStr(name)) return;
+          if (!refs.costumes.has(tgt)) refs.costumes.set(tgt, new Set());
+          refs.costumes.get(tgt).add(name);
+        };
+        const wantSound = (tgt, name) => {
+          if (!isDict(tgt) || !isStr(name)) return;
+          if (!refs.sounds.has(tgt)) refs.sounds.set(tgt, new Set());
+          refs.sounds.get(tgt).add(name);
+        };
+        for (const tgt of list) {
+          if (!isDict(tgt)) continue;
+          const blocks = isDict(tgt.blocks) ? tgt.blocks : {};
+          for (const blk of Object.values(blocks)) {
+            if (!isDict(blk) || !isStr(blk.opcode)) continue;
+            const op = blk.opcode;
+
+            // Any sprite-name field names another target.  Values such as
+            // `_mouse_`, `_myself_` and `_random_` are not sprite names.
+            if (isDict(blk.fields)) {
+              for (const [key, fv] of Object.entries(blk.fields)) {
+                if (!SPRITE_MENU_KEYS.has(key) || !isArr(fv) || !isStr(fv[0])) continue;
+                if (!fv[0].startsWith("_")) refs.sprites.add(fv[0]);
+              }
+            }
+            // A reporter in a sprite menu can name any sprite at run time.
+            // `create clone of` is the usual case, but `goto`, `point
+            // towards`, `touching`, `distance to` and `sensing_of` all take a
+            // sprite menu as well, and a project edited outside the editor can
+            // hold a reporter in any of them.
+            if (isDict(blk.inputs)) {
+              for (const key of SPRITE_MENU_KEYS) {
+                if (has(blk.inputs, key) && menuFieldValue(blocks, blk, key) === null) {
+                  refs.dynamicSprites = true;
+                }
+              }
+            }
+
+            if (op === "looks_nextcostume") {
+              refs.allCostumes.add(tgt);
+            } else if (op === "looks_nextbackdrop") {
+              if (stage) refs.allCostumes.add(stage);
+            } else if (op === "looks_costumenumbername") {
+              const fv = isDict(blk.fields) ? blk.fields.NUMBER_NAME : null;
+              // `number` reports a slot, so every costume has to keep its own.
+              if (!isArr(fv) || fv[0] !== "name") refs.allCostumes.add(tgt);
+            } else if (op === "looks_backdropnumbername") {
+              const fv = isDict(blk.fields) ? blk.fields.NUMBER_NAME : null;
+              if (!isArr(fv) || fv[0] !== "name") {
+                if (stage) refs.allCostumes.add(stage);
+              }
+            } else if (op === "looks_switchcostumeto") {
+              const name = menuFieldValue(blocks, blk, "COSTUME");
+              if (name === null || isIndexLike(name) || ALL_COSTUME_WORDS.has(name)) {
+                refs.allCostumes.add(tgt);
+              } else {
+                wantCostume(tgt, name);
+              }
+            } else if (op === "looks_switchbackdropto" ||
+                       op === "looks_switchbackdroptoandwait") {
+              const name = menuFieldValue(blocks, blk, "BACKDROP");
+              if (name === null || isIndexLike(name) || ALL_BACKDROP_WORDS.has(name)) {
+                if (stage) refs.allCostumes.add(stage);
+              } else {
+                wantCostume(stage, name);
+              }
+            } else if (op === "event_whenbackdropswitchesto") {
+              // The hat only fires while the backdrop it names still exists.
+              const fv = isDict(blk.fields) ? blk.fields.BACKDROP : null;
+              if (isArr(fv)) wantCostume(stage, fv[0]);
+            } else if (op === "sensing_of") {
+              const prop = isDict(blk.fields) && isArr(blk.fields.PROPERTY)
+                ? blk.fields.PROPERTY[0] : null;
+              // OBJECT is an input pointing at a `sensing_of_object_menu`
+              // shadow, and its value is the target name (`_stage_` for the
+              // Stage).  A reporter there can name any target at run time.
+              const obj = menuFieldValue(blocks, blk, "OBJECT");
+              const indexed = prop === "costume #" || prop === "backdrop #" ||
+                prop === "background #";
+              if (indexed) {
+                if (obj === null) {
+                  for (const other of list) {
+                    if (isDict(other)) refs.allCostumes.add(other);
+                  }
+                } else {
+                  const owner = obj === "_stage_" ? stage : byName.get(obj);
+                  if (isDict(owner)) refs.allCostumes.add(owner);
+                }
+              }
+            }
+
+            if (op === "sound_play" || op === "sound_playuntildone") {
+              const name = menuFieldValue(blocks, blk, "SOUND_MENU");
+              // `_getSoundIndex` tries the name first and then
+              // `parseInt(name, 10)` as a 1-based index, clamped to the list,
+              // so a numeric name reaches a position dependent sound.
+              if (name === null || !Number.isNaN(parseInt(name, 10))) {
+                refs.allSounds.add(tgt);
+              } else {
+                wantSound(tgt, name);
+              }
+            } else if (!blk.shadow && op.startsWith("sound_") && !SOUND_NO_MENU_OPS.has(op)) {
+              // A sound block we do not know could name a sound we cannot see.
+              // Menu shadows (`sound_sounds_menu`) never execute, so they are
+              // covered by the `sound_play` branch above.
+              refs.allSounds.add(tgt);
+            }
+          }
+        }
+        return refs;
+      };
+
+      const monitoredSprites = new Set();
       for (const mon of (isArr(monitors) ? monitors : [])) {
-        if (!isDict(mon)) continue;
-        if (mon.spriteName !== null && mon.spriteName !== undefined) {
-          referencedSpriteNames.add(mon.spriteName);
-        }
+        if (isDict(mon) && isStr(mon.spriteName)) monitoredSprites.add(mon.spriteName);
       }
 
-      for (const tgt of targets) {
+      // A sprite can be the only thing that names another sprite, so dropping
+      // one can make the next one dead: settle the survivors first.
+      let alive = targets.slice();
+      let refs = analyze(alive);
+      for (let round = 0; round < 8; round++) {
+        if (refs.dynamicSprites) break;
+        const next = alive.filter((tgt) => {
+          if (!isDict(tgt) || tgt.isStage) return true;
+          if (isDict(tgt.blocks) && Object.keys(tgt.blocks).length) return true;
+          if (tgt.visible !== false) return true;
+          return refs.sprites.has(tgt.name) || monitoredSprites.has(tgt.name);
+        });
+        if (next.length === alive.length) break;
+        st.dead_sprites_removed += alive.length - next.length;
+        alive = next;
+        refs = analyze(alive);
+      }
+
+      const EMPTY = new Set();
+      for (const tgt of alive) {
         if (!isDict(tgt)) continue;
-        const isStage = !!tgt.isStage;
-        const tname = tgt.name;
-        const blocks = isDict(tgt.blocks) ? tgt.blocks : {};
-
-        // Check for costume/backdrop references
-        const usesNextCostume = Object.values(blocks).some(blk =>
-          isDict(blk) && (blk.opcode === "looks_nextcostume" ||
-            (isStage && blk.opcode === "looks_nextbackdrop")));
-        const usesCostumeReporter = Object.values(blocks).some(blk =>
-          isDict(blk) && (blk.opcode === "looks_costumenumbername" ||
-            (isStage && blk.opcode === "looks_backdropnumbername")));
-        const usesSensingOfCostume = Object.values(blocks).some(blk =>
-          isDict(blk) && blk.opcode === "sensing_of" &&
-          isDict(blk.fields) && isArr(blk.fields.PROPERTY) &&
-          blk.fields.PROPERTY[0] &&
-          ["costume #", "costume name", "backdrop #", "backdrop name"].includes(
-            blk.fields.PROPERTY[0].toLowerCase()));
-
-        const allCostumesNeeded = usesNextCostume || usesCostumeReporter || usesSensingOfCostume;
-
-        // Collect explicitly referenced costume names
-        const referencedCostumeNames = new Set();
-        for (const blk of Object.values(blocks)) {
-          if (!isDict(blk)) continue;
-          const op = blk.opcode;
-          const fields = blk.fields || {};
-          if (op === "looks_switchcostumeto" || op === "looks_switchbackdropto") {
-            const fv = fields.COSTUME || fields.BACKDROP;
-            if (isArr(fv) && fv[0]) referencedCostumeNames.add(fv[0]);
+        if (isArr(tgt.costumes) && tgt.costumes.length) {
+          const list = tgt.costumes;
+          const curIdx = Number.isInteger(tgt.currentCostume) ? tgt.currentCostume : 0;
+          const cur = list[curIdx];
+          const curName = isDict(cur) ? cur.name : null;
+          let kept = list;
+          if (!refs.allCostumes.has(tgt)) {
+            const wanted = refs.costumes.get(tgt) || EMPTY;
+            kept = list.filter((c) => isDict(c) && (c.name === curName || wanted.has(c.name)));
+            // A target always needs at least one costume to render.
+            if (!kept.length) kept = [list[0]];
           }
-        }
-
-        // Check for sound references
-        const usesAnySound = Object.values(blocks).some(blk =>
-          isDict(blk) && blk.opcode && blk.opcode.startsWith("sound_"));
-
-        // Collect explicitly referenced sound names
-        const referencedSoundNames = new Set();
-        for (const blk of Object.values(blocks)) {
-          if (!isDict(blk)) continue;
-          const fields = blk.fields || {};
-          const fv = fields.SOUND_MENU;
-          if (isArr(fv) && fv[0]) referencedSoundNames.add(fv[0]);
-        }
-
-        // Remove dead costumes
-        if (isArr(tgt.costumes)) {
-          const currentCostumeIndex = tgt.currentCostume || 0;
-          const currentCostume = tgt.costumes[currentCostumeIndex];
-          const currentCostumeName = currentCostume ? currentCostume.name : null;
-
-          const keptCostumes = [];
-          for (const c of tgt.costumes) {
-            if (allCostumesNeeded) {
-              keptCostumes.push(c);
-            } else if (c.name === currentCostumeName || referencedCostumeNames.has(c.name)) {
-              keptCostumes.push(c);
-            } else {
-              st.dead_costumes_removed += 1;
-            }
+          if (kept.length !== list.length) {
+            st.dead_costumes_removed += list.length - kept.length;
+            // Dropping a costume shifts the indices, so the saved current
+            // costume has to be re-pointed at the survivor it named.
+            const idx = kept.findIndex((c) => isDict(c) && c.name === curName);
+            if (Number.isInteger(tgt.currentCostume)) tgt.currentCostume = idx >= 0 ? idx : 0;
           }
-          tgt.costumes = keptCostumes;
+          tgt.costumes = kept;
         }
-
-        // Remove dead sounds
-        if (isArr(tgt.sounds)) {
-          const keptSounds = [];
-          for (const s of tgt.sounds) {
-            if (usesAnySound || referencedSoundNames.has(s.name)) {
-              keptSounds.push(s);
-            } else {
-              st.dead_sounds_removed += 1;
-            }
+        if (isArr(tgt.sounds) && tgt.sounds.length) {
+          const list = tgt.sounds;
+          let kept = list;
+          if (!refs.allSounds.has(tgt)) {
+            const wanted = refs.sounds.get(tgt) || EMPTY;
+            kept = list.filter((s) => isDict(s) && wanted.has(s.name));
           }
-          tgt.sounds = keptSounds;
+          if (kept.length !== list.length) {
+            st.dead_sounds_removed += list.length - kept.length;
+          }
+          tgt.sounds = kept;
         }
       }
 
-      // Remove dead sprites (visible: false, no scripts, no references)
-      // Return the filtered targets array to be assigned by the caller
-      const keptTargets = [];
-      for (const tgt of targets) {
-        if (!isDict(tgt) || tgt.isStage) {
-          keptTargets.push(tgt);
-          continue;
-        }
-
-        const hasScripts = isDict(tgt.blocks) && Object.keys(tgt.blocks).length > 0;
-        const isVisible = tgt.visible !== false;
-        const isReferenced = referencedSpriteNames.has(tgt.name);
-
-        if (!hasScripts && !isVisible && !isReferenced) {
-          st.dead_sprites_removed += 1;
-        } else {
-          keptTargets.push(tgt);
-        }
-      }
-      return keptTargets;
+      return alive;
     }
 
     // ------------------------------------------------------------------
-    // Proposal 2: Remove write-only variables and lists
+    // Proposal 2: remove stores that are written but never read.
+    //
+    // A store counts as read when a reporter, a list reader, a standalone
+    // reporter, a visible monitor, or `sensing_of` can reach it.
+    // `scratch3_sensing.getAttributeOf` falls through to
+    // `lookupVariableByNameAndType(PROPERTY, "", true)` when PROPERTY is not a
+    // sprite attribute, so `sensing_of [<name>] of [<sprite>]` really does read
+    // a scalar variable; those ids come from `sensedVarIds`.  Fields the scanner
+    // could not classify and stores behind a kept monitor survive as well.
+    //
+    // Only the store's own writers and hiders are deleted, so a C-block that
+    // owns a substack is never dropped.  Value inputs that were attached to a
+    // deleted writer become unreachable and are swept afterwards.
     _removeWriteOnly(targets, monitors) {
       const st = this.stats;
+      const keepV = union(this.readVarIds, this.showVarIds, this.visibleVarIds,
+        this.standaloneVarIds, this.sensedVarIds, this.unknownReadVarIds,
+        this.keptMonVarIds);
+      const keepL = union(this.readListIds, this.showListIds, this.visibleListIds,
+        this.standaloneListIds, this.unknownReadListIds, this.keptMonListIds);
+      const blocksOf = (tgt) => (isDict(tgt) && isDict(tgt.blocks) ? tgt.blocks : {});
+      const fieldId = (blk, key) => {
+        const fv = isDict(blk) && isDict(blk.fields) ? blk.fields[key] : null;
+        return isArr(fv) && isStr(fv[1]) ? fv[1] : null;
+      };
 
-      // In Scratch 3.0, sensing_of does NOT reference variables directly.
-      // It only references sprite properties. So we don't need to check sensing_of.
+      // Writers/hiders of a removed store.  Every opcode here is a plain stack
+      // command, so deleting one can never take a substack with it.
+      const varCmd = new Set([...VAR_WRITE_OPS, "data_hidevariable"]);
+      const listCmd = new Set([...LIST_WRITE_OPS, "data_hidelist"]);
 
-      // A variable/list is "write-only" if:
-      // - It is written to (set/change/add/etc.)
-      // - It is NOT read from (variable reporter, list contents, item of, etc.)
-      // - It is NOT shown (monitor)
-      // - It is NOT a cloud variable
-      // - It is NOT a standalone reporter (top-level)
-
-      // Build read/write sets again (excluding write from "used")
-      const readV = new Set();
-      const writeV = new Set();
-      const readL = new Set();
-      const writeL = new Set();
-      const showV = new Set();
-      const showL = new Set();
-      const standaloneV = new Set();
-      const standaloneL = new Set();
-      const removedV = new Set();
-      const removedL = new Set();
-      const removedNamesV = new Set();
-      const removedNamesL = new Set();
-
-      const VAR_WRITE_OPS = new Set(["data_setvariableto", "data_changevariableby"]);
-      const VAR_READ_OPS = new Set(["data_variable"]);
-      const LIST_WRITE_OPS = new Set(["data_addtolist", "data_deleteoflist", "data_deletealloflist",
-        "data_insertatlist", "data_replaceitemoflist"]);
-      const LIST_READ_OPS = new Set(["data_listcontents", "data_itemoflist", "data_itemnumoflist",
-        "data_lengthoflist", "data_listcontainsitem"]);
-
+      // `control_for_each` owns its variable: scratch-vm calls
+      // lookupOrCreateVariable on every iteration, so dropping the store would
+      // only make the block recreate it under the name it still carries.
+      const loopV = new Set();
+      // Anything that mentions a store from a block we are not going to delete
+      // also keeps it.  The scanner's read sets are the primary gate; this is
+      // the belt-and-braces one.
+      const referenced = new Set();
+      const scanPrim = (node) => {
+        if (!isArr(node)) return;
+        if (node.length > 2 && (node[0] === 12 || node[0] === 13) && isStr(node[2])) {
+          referenced.add(node[2]);
+          return;
+        }
+        for (const item of node) scanPrim(item);
+      };
       for (const tgt of targets) {
-        if (!isDict(tgt)) continue;
-        const blocks = isDict(tgt.blocks) ? tgt.blocks : {};
-
-        for (const [bid, blk] of Object.entries(blocks)) {
+        for (const blk of Object.values(blocksOf(tgt))) {
           if (!isDict(blk)) continue;
           const op = blk.opcode;
-          const fields = blk.fields || {};
-
-          // Variable references
-          if (fields.VARIABLE) {
-            const fv = fields.VARIABLE;
-            const vname = fv[0];
-            const vid = fv[1];
-
-            if (VAR_WRITE_OPS.has(op)) {
-              if (isStr(vid)) writeV.add(vid);
-            } else if (op === "data_showvariable") {
-              if (isStr(vid)) showV.add(vid);
-            } else if (op === "data_hidevariable") {
-              // hidden only
-            } else {
-              if (isStr(vid)) readV.add(vid);
-            }
+          if (op === "control_for_each") {
+            const id = fieldId(blk, "VARIABLE");
+            if (isStr(id)) loopV.add(id);
           }
-
-          // List references
-          if (fields.LIST) {
-            const fv = fields.LIST;
-            const lname = fv[0];
-            const lid = fv[1];
-
-            if (LIST_WRITE_OPS.has(op)) {
-              if (isStr(lid)) writeL.add(lid);
-            } else if (op === "data_showlist") {
-              if (isStr(lid)) showL.add(lid);
-            } else if (op === "data_hidelist") {
-              // hidden only
-            } else {
-              if (isStr(lid)) readL.add(lid);
-            }
-          }
-
-          // Store-primitive references in inputs (variable/list)
+          if (varCmd.has(op) || listCmd.has(op)) continue;
+          const vid = fieldId(blk, "VARIABLE");
+          if (isStr(vid)) referenced.add(vid);
+          const lid = fieldId(blk, "LIST");
+          if (isStr(lid)) referenced.add(lid);
           if (isDict(blk.inputs)) {
-            for (const v of Object.values(blk.inputs)) {
-              if (!Array.isArray(v)) continue;
-              for (let i = 1; i < v.length; i++) {
-                const prim = v[i];
-                if (!Array.isArray(prim) || prim.length < 3) continue;
-                if (prim[0] !== 12 && prim[0] !== 13) continue;
-                const sid = prim[2];
-                if (!isStr(sid)) continue;
-                let isVar = false, isList = false;
-                for (const t2 of targets) {
-                  if (!isDict(t2)) continue;
-                  if (isDict(t2.variables) && Object.prototype.hasOwnProperty.call(t2.variables, sid)) isVar = true;
-                  if (isDict(t2.lists) && Object.prototype.hasOwnProperty.call(t2.lists, sid)) isList = true;
-                }
-                if (isVar) readV.add(sid);
-                if (isList) readL.add(sid);
-              }
-            }
-          }          if (blk.topLevel === true) {
-            if (op === "data_variable") {
-              const fv = fields.VARIABLE;
-              if (fv && isStr(fv[1])) standaloneV.add(fv[1]);
-            } else if (op === "data_listcontents") {
-              const fv = fields.LIST;
-              if (fv && isStr(fv[1])) standaloneL.add(fv[1]);
-            }
+            for (const v of Object.values(blk.inputs)) scanPrim(v);
           }
         }
       }
 
-      // Monitor references
-      for (const mon of (isArr(monitors) ? monitors : [])) {
-        if (!isDict(mon)) continue;
-        const op = mon.opcode;
-        const params = mon.params || {};
-
-        if (op === "data_variable") {
-          const mname = params.VARIABLE;
-          for (const tgt of targets) {
-            if (!isDict(tgt) || !isDict(tgt.variables)) continue;
-            for (const [vid, ent] of Object.entries(tgt.variables)) {
-              if (isArr(ent) && ent[0] === mname) showV.add(vid);
-            }
-          }
-        } else if (op === "data_listcontents") {
-          const mname = params.LIST;
-          for (const tgt of targets) {
-            if (!isDict(tgt) || !isDict(tgt.lists)) continue;
-            for (const [lid, ent] of Object.entries(tgt.lists)) {
-              if (isArr(ent) && ent[0] === mname) showL.add(lid);
-            }
-          }
-        }
-      }
-
-      // Remove write-only variables
+      const removed = new Set();
       for (const tgt of targets) {
         if (!isDict(tgt)) continue;
         if (isDict(tgt.variables)) {
           for (const [id, ent] of Object.entries(tgt.variables)) {
             const name = isArr(ent) && ent.length ? ent[0] : String(ent);
-            const isCloud = isStr(name) && name.startsWith(CLOUD_PREFIX);
-
-            if (isCloud) continue; // Never remove cloud variables
-            if (readV.has(id) || showV.has(id) || standaloneV.has(id)) continue; // Not write-only
-            if (!writeV.has(id)) continue; // Not written to at all
-
+            if (isStr(name) && name.startsWith(CLOUD_PREFIX)) continue;
+            if (keepV.has(id) || loopV.has(id) || referenced.has(id)) continue;
+            if (!this.writeVarIds.has(id)) continue;
             delete tgt.variables[id];
             st.writeonly_vars_removed += 1;
-            removedV.add(id);
-            removedNamesV.add(name);
+            removed.add(id);
           }
         }
-
-        // Remove write-only lists
         if (isDict(tgt.lists)) {
-          for (const [id, ent] of Object.entries(tgt.lists)) {
-            if (readL.has(id) || showL.has(id) || standaloneL.has(id)) continue; // Not write-only
-            if (!writeL.has(id)) continue; // Not written to at all
-
+          for (const id of Object.keys(tgt.lists)) {
+            if (keepL.has(id) || referenced.has(id)) continue;
+            if (!this.writeListIds.has(id)) continue;
             delete tgt.lists[id];
             st.writeonly_lists_removed += 1;
-            removedL.add(id);
-            removedNamesL.add(isArr(ent) && ent.length ? ent[0] : String(ent));
+            removed.add(id);
           }
-    // Remove blocks that reference removed variables/lists, and fix links
-    for (const tgt of targets) {
-      if (!isDict(tgt)) continue;
-      const blocks = isDict(tgt.blocks) ? tgt.blocks : {};
-      const removedBlocks = {};
-      const removedIds = new Set();
-      for (const [bid, blk] of Object.entries(blocks)) {
-        if (!isDict(blk)) continue;
-        const fv = blk.fields && blk.fields.VARIABLE;
-        const fl = blk.fields && blk.fields.LIST;
-        const vid = fv && isArr(fv) && isStr(fv[1]) ? fv[1] : null;
-        const lid = fl && isArr(fl) && isStr(fl[1]) ? fl[1] : null;
-        let isRemoved = (vid && removedV.has(vid)) || (lid && removedL.has(lid));
-        if (!isRemoved && isDict(blk.inputs)) {
-          for (const v of Object.values(blk.inputs)) {
-            if (!Array.isArray(v)) continue;
-            for (let i = 1; i < v.length; i++) {
-              const prim = v[i];
-              if (!Array.isArray(prim) || prim.length < 3) continue;
-              if (prim[0] !== 12 && prim[0] !== 13) continue;
-              const sid = prim[2];
-              if (isStr(sid) && (removedV.has(sid) || removedL.has(sid))) { isRemoved = true; break; }
+        }
+      }
+      if (!removed.size) return;
+
+      for (const tgt of targets) {
+        if (!isDict(tgt.blocks)) continue;
+        const blocks = tgt.blocks;
+        const gone = new Map();
+        for (const [bid, blk] of Object.entries(blocks)) {
+          if (!isDict(blk)) continue;
+          const op = blk.opcode;
+          const key = varCmd.has(op) ? "VARIABLE" : listCmd.has(op) ? "LIST" : null;
+          if (key === null) continue;
+          const id = fieldId(blk, key);
+          if (isStr(id) && removed.has(id)) gone.set(bid, blk);
+        }
+        if (!gone.size) continue;
+        const kept = {};
+        for (const [bid, blk] of Object.entries(blocks)) {
+          if (!gone.has(bid)) kept[bid] = blk;
+        }
+        const isKept = (id) => isStr(id) && has(kept, id);
+        // Removed blocks can sit next to each other (two write-only stores in a
+        // row), so every link is walked past the whole run: stopping at the
+        // neighbouring removed block would leave a dangling `next`/`parent` and
+        // detach the rest of the script.
+        const nextPastRemoved = (id) => {
+          let cur = id;
+          const seen = new Set();
+          while (isStr(cur) && gone.has(cur) && !seen.has(cur)) {
+            seen.add(cur);
+            const blk = gone.get(cur);
+            cur = isStr(blk.next) ? blk.next : null;
+          }
+          return isKept(cur) ? cur : null;
+        };
+        // Walk up to the nearest surviving parent.  `promote` is the removed
+        // block that headed the script when the whole ancestor run was cut
+        // away: the survivor then has to become a script head of its own.
+        const parentPastRemoved = (id) => {
+          let cur = id;
+          let promote = null;
+          const seen = new Set();
+          while (isStr(cur) && gone.has(cur) && !seen.has(cur)) {
+            seen.add(cur);
+            const blk = gone.get(cur);
+            if (blk.topLevel === true) promote = blk;
+            cur = isStr(blk.parent) ? blk.parent : null;
+          }
+          return { parent: isKept(cur) ? cur : null, promote: promote };
+        };
+        for (const blk of Object.values(kept)) {
+          if (!isDict(blk)) continue;
+          if (isStr(blk.next) && !isKept(blk.next)) blk.next = nextPastRemoved(blk.next);
+          if (isStr(blk.parent) && !isKept(blk.parent)) {
+            const up = parentPastRemoved(blk.parent);
+            blk.parent = up.parent;
+            if (up.parent === null && up.promote !== null) {
+              blk.topLevel = true;
+              if (has(up.promote, "x")) blk.x = up.promote.x;
+              if (has(up.promote, "y")) blk.y = up.promote.y;
             }
-            if (isRemoved) break;
           }
-        }
-        if (isRemoved) {
-          removedBlocks[bid] = blk;
-          removedIds.add(bid);
-        }
-      }
-      const kept = {};
-      for (const [bid, blk] of Object.entries(blocks)) {
-        if (removedIds.has(bid)) continue;
-        kept[bid] = blk;
-      }
-      // Splice chains and inputs that pointed at removed blocks
-      for (const blk of Object.values(kept)) {
-        if (!isDict(blk)) continue;
-        if (isStr(blk.next) && removedIds.has(blk.next)) {
-          blk.next = removedBlocks[blk.next] && isStr(removedBlocks[blk.next].next)
-            ? removedBlocks[blk.next].next : null;
-        } else if (isStr(blk.next) && !Object.prototype.hasOwnProperty.call(kept, blk.next)) {
-          blk.next = null;
-        }
-        if (isStr(blk.parent) && removedIds.has(blk.parent)) {
-          blk.parent = removedBlocks[blk.parent] && isStr(removedBlocks[blk.parent].parent)
-            ? removedBlocks[blk.parent].parent : null;
-        } else if (isStr(blk.parent) && !Object.prototype.hasOwnProperty.call(kept, blk.parent)) {
-          blk.parent = null;
-        }
-        if (isDict(blk.inputs)) {
-          for (const k of Object.keys(blk.inputs)) {
-            const v = blk.inputs[k];
-            if (Array.isArray(v) && v.length >= 2 && isStr(v[1]) && removedIds.has(v[1])) {
-              const nb = removedBlocks[v[1]];
-              v[1] = (nb && isStr(nb.next)) ? nb.next : null;
+          if (isDict(blk.inputs)) {
+            for (const k of Object.keys(blk.inputs)) {
+              const v = blk.inputs[k];
+              if (isArr(v) && v.length >= 2 && isStr(v[1]) && !isKept(v[1])) {
+                v[1] = nextPastRemoved(v[1]);
+              }
             }
           }
         }
+        tgt.blocks = kept;
+        this._pruneDetachedBlocks(tgt);
       }
-      tgt.blocks = kept;
+
+      // A monitor is tied to its store by id, so only an exact id match goes.
+      // Resolving by name would also drop another sprite's monitor for a local
+      // variable that happens to share the name.
+      if (isArr(monitors)) {
+        const keptMons = monitors.filter((mon) =>
+          !(isDict(mon) && isStr(mon.id) && removed.has(mon.id)));
+        if (keptMons.length !== monitors.length) {
+          monitors.length = 0;
+          for (const m of keptMons) monitors.push(m);
+        }
+      }
     }
 
-    // Remove monitors for removed variables/lists
-    if (isArr(monitors)) {
-      const keptMons = [];
-      for (const mon of monitors) {
-        if (!isDict(mon)) { keptMons.push(mon); continue; }
-        const params = mon.params || {};
-        const op = mon.opcode;
-        let mname = null;
-        if (op === "data_variable") mname = params.VARIABLE;
-        else if (op === "data_listcontents") mname = params.LIST;
-        if (mname !== null && mname !== undefined) {
-          if (op === "data_variable" && removedNamesV.has(mname)) continue;
-          if (op === "data_listcontents" && removedNamesL.has(mname)) continue;
-        }
-        keptMons.push(mon);
+    // Drop blocks that no script head can reach any more.  A writer that was
+    // just removed may have been the only owner of a value reporter; leaving it
+    // behind would keep dead JSON and a dangling `parent` in the project.
+    _pruneDetachedBlocks(tgt) {
+      const blocks = isDict(tgt) ? tgt.blocks : null;
+      if (!isDict(blocks)) return;
+      const roots = [];
+      for (const [bid, blk] of Object.entries(blocks)) {
+        if (isDict(blk) && blk.topLevel === true) roots.push(bid);
       }
-      monitors.length = 0;
-      for (const m of keptMons) monitors.push(m);
-    }
+      // No head at all means the target was already unusual; keep it as it is.
+      if (!roots.length) return;
+      const seen = new Set();
+      const stack = roots.slice();
+      while (stack.length) {
+        const id = stack.pop();
+        if (!isStr(id) || seen.has(id)) continue;
+        const blk = blocks[id];
+        if (!isDict(blk)) continue;
+        seen.add(id);
+        if (isStr(blk.next)) stack.push(blk.next);
+        const inputs = isDict(blk.inputs) ? blk.inputs : {};
+        for (const v of Object.values(inputs)) {
+          if (!isArr(v)) continue;
+          if (isStr(v[1])) stack.push(v[1]);
+          if (isStr(v[2])) stack.push(v[2]);
         }
+      }
+      if (seen.size === Object.keys(blocks).length) return;
+      for (const bid of Object.keys(blocks)) {
+        if (!seen.has(bid)) delete blocks[bid];
       }
     }
     // Proposal 4: Normalize types and representations
@@ -5573,6 +5659,48 @@
     return { project: out, stats: comp.stats };
   }
 
+  // Asset file name of every costume and sound the project still points at.
+  // `assetId` + `dataFormat` is what scratch-vm reads; `md5ext` is only an
+  // editor convenience, so both spellings are accepted when it is present.
+  function collectAssetNames(project) {
+    const names = new Set();
+    const add = (assetId, dataFormat, md5ext) => {
+      if (isStr(md5ext) && md5ext) names.add(md5ext);
+      if (!isStr(assetId) || !assetId) return;
+      names.add(isStr(dataFormat) && dataFormat ? assetId + "." + dataFormat : assetId);
+    };
+    const targets = isDict(project) && isArr(project.targets) ? project.targets : [];
+    for (const tgt of targets) {
+      if (!isDict(tgt)) continue;
+      for (const c of (isArr(tgt.costumes) ? tgt.costumes : [])) {
+        if (isDict(c)) add(c.assetId, c.dataFormat, c.md5ext);
+      }
+      for (const s of (isArr(tgt.sounds) ? tgt.sounds : [])) {
+        if (isDict(s)) add(s.assetId, s.dataFormat, s.md5ext);
+      }
+    }
+    return names;
+  }
+
+  // Only real asset files look like `<32 hex>.<ext>`, so extra files a project
+  // carries next to project.json are always repacked untouched.
+  const ASSET_FILE_NAME = /^[0-9a-f]{32}\.[0-9a-z]+$/i;
+
+  // Drop zip entries that no costume or sound names any more.  Without this the
+  // dead-asset pass only shortens project.json and the zip keeps the bytes.
+  function pruneAssetEntries(entries, project) {
+    if (!isArr(entries) || !entries.length) return isArr(entries) ? entries : [];
+    const keep = collectAssetNames(project);
+    const kept = [];
+    for (const entry of entries) {
+      if (!isDict(entry)) { kept.push(entry); continue; }
+      const base = String(entry.name || "").split(/[\\/]/).pop();
+      if (ASSET_FILE_NAME.test(base) && !keep.has(base)) continue;
+      kept.push(entry);
+    }
+    return kept;
+  }
+
   async function compressBuffer(buffer, filename, options, progress) {
     const report = typeof progress === "function" ? progress : () => {};
     const loaded = await loadInput(buffer, filename, report);
@@ -5582,7 +5710,9 @@
     const outBytes = dumpsCompact(project);
     report("serialize", 1.0, `JSON serialized (${humanSize(outBytes.length)})`);
     const finalBytes = loaded.container === "sb3"
-      ? await packageSb3(loaded.entries, outBytes, report)
+      ? await packageSb3(
+        comp.options.removeDeadAssets ? pruneAssetEntries(loaded.entries, project) : loaded.entries,
+        outBytes, report)
       : outBytes;
     const origJson = loaded.pjRaw.length;
     const newJson = outBytes.length;
@@ -5615,6 +5745,8 @@
     CompressError,
     compressProject,
     compressBuffer,
+    collectAssetNames,
+    pruneAssetEntries,
     dumpsCompact,
     defaultOutputName,
     humanSize,

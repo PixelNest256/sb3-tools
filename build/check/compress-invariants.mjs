@@ -24,11 +24,16 @@
  *      leave every visible name (variables, lists, messages, custom blocks,
  *      arguments) exactly as it was;
  *   7. near-duplicate merging never moves a `control_stop` into the generated
- *      procedure, where "stop this script" would only end the procedure.
+ *      procedure, where "stop this script" would only end the procedure;
+ *   8. removing a run of blocks (adjacent write-only stores) re-points every
+ *      link past the whole run, so no block ends up detached from its script;
+ *   9. a costume chosen at run time (or named by a menu) survives, and
+ *      `currentCostume` still points at the costume it named.
  *
  * Invariants 1-3 were broken by "remove legacy mutation keys"; 4 by clearing
  * every overwritten value; 5 by "shorten internal IDs" and by near-duplicate
- * merging. All of these reached users and made projects fail to load or behave
+ * merging; 8 and 9 by "remove write-only variables" and "remove dead assets".
+ * All of these reached users and made projects fail to load or behave
  * differently.
  */
 import { createRequire } from "node:module";
@@ -1105,6 +1110,572 @@ check(noStripComments.cfg && noStripComments.cfg.blockId === null,
   "the config comment was not detached from its removed block");
 check(!!noStripComments.notes, "a detached ordinary comment was dropped without stripComments");
 check(!noStripComments.anchored, "a comment on a removed block survived unreachable-code removal");
+
+/*
+ * 7. Removing a block must not leave a link behind.  Write-only stores that sit
+ *    next to each other are removed as a run: re-pointing the block before the
+ *    run at the *next removed* block left a dangling `next`/`parent`, which
+ *    detaches everything after it from the script (the editor stops drawing
+ *    it, and a second compression deletes it as unreachable).
+ */
+function buildRemovalRunProject() {
+  return {
+    targets: [{
+      isStage: false, name: "Sprite1",
+      variables: {
+        DEAD_A: ["deadA", 0], DEAD_B: ["deadB", 0], DEAD_C: ["deadC", 0],
+        KEPT: ["kept", 0]
+      },
+      lists: {}, broadcasts: {},
+      blocks: {
+        // Two adjacent write-only stores, then real work.
+        flag: blk("event_whenflagclicked", { topLevel: true, x: 40, y: 40, next: "setDeadA" }),
+        setDeadA: blk("data_setvariableto", {
+          parent: "flag", next: "setDeadB",
+          inputs: { VALUE: [1, [4, "1"]] }, fields: { VARIABLE: ["deadA", "DEAD_A"] }
+        }),
+        setDeadB: blk("data_setvariableto", {
+          parent: "setDeadA", next: "repeat",
+          inputs: { VALUE: [1, [4, "2"]] }, fields: { VARIABLE: ["deadB", "DEAD_B"] }
+        }),
+        repeat: blk("control_repeat", {
+          parent: "setDeadB", next: "sayKept",
+          inputs: { TIMES: [1, [6, "5"]], SUBSTACK: [2, "setDeadC"] }
+        }),
+        // A removed store as the *first* block of a substack: the SUBSTACK
+        // input has to be re-pointed past it.
+        setDeadC: blk("data_setvariableto", {
+          parent: "repeat", next: "changeKept",
+          inputs: { VALUE: [1, [4, "3"]] }, fields: { VARIABLE: ["deadC", "DEAD_C"] }
+        }),
+        // Grows every iteration, so the read below is not a constant and the
+        // store has to survive as a regular store.
+        changeKept: blk("data_changevariableby", {
+          parent: "setDeadC", inputs: { VALUE: [1, [4, "1"]] },
+          fields: { VARIABLE: ["kept", "KEPT"] }
+        }),
+        sayKept: blk("looks_say", { parent: "repeat", inputs: { MESSAGE: [3, "readKept", [10, ""]] } }),
+        readKept: blk("data_variable", { parent: "sayKept", fields: { VARIABLE: ["kept", "KEPT"] } })
+      },
+      comments: {},
+      currentCostume: 0,
+      costumes: [{
+        name: "c", dataFormat: "svg", assetId: "3".repeat(32),
+        md5ext: "3".repeat(32) + ".svg", bitmapResolution: 1,
+        rotationCenterX: 0, rotationCenterY: 0
+      }],
+      sounds: [], volume: 100, layerOrder: 0, visible: true, x: 0, y: 0, size: 100,
+      direction: 90, draggable: false, rotationStyle: "all around"
+    }],
+    monitors: [], extensions: [], meta: { semver: "3.0.0" }
+  };
+}
+
+// Counts the blocks a script walk from the hats reaches: anything left over is
+// detached (the editor would not draw it and the VM would not run it).
+function scriptReachability(project) {
+  let total = 0, inScripts = 0;
+  for (const t of project.targets || []) {
+    const blocks = t.blocks || {};
+    const seen = new Set();
+    const visit = (id) => {
+      if (typeof id !== "string" || seen.has(id)) return;
+      const b = blocks[id];
+      if (b === undefined) return;
+      seen.add(id);
+      if (Array.isArray(b)) { for (let i = 1; i < b.length; i++) visit(b[i]); return; }
+      if (!b || typeof b !== "object") return;
+      for (const value of Object.values(b.inputs || {})) {
+        if (Array.isArray(value)) for (let i = 1; i < value.length; i++) visit(value[i]);
+      }
+      visit(b.next);
+    };
+    for (const [bid, b] of Object.entries(blocks)) {
+      if (b && !Array.isArray(b) && b.topLevel === true) visit(bid);
+    }
+    for (const [bid, b] of Object.entries(blocks)) {
+      if (Array.isArray(b) || !b || typeof b.opcode !== "string") continue;
+      total += 1;
+      if (seen.has(bid)) inScripts += 1;
+    }
+  }
+  return { total, inScripts };
+}
+
+const removalRun = SB3.compressProject(buildRemovalRunProject(),
+  new SB3.Options({ removeWriteOnly: true }), () => {});
+audit(removalRun.project);
+check(removalRun.stats.writeonly_vars_removed === 3,
+  `expected 3 write-only stores to go, removed ${removalRun.stats.writeonly_vars_removed}`);
+const removalRunReach = scriptReachability(removalRun.project);
+check(removalRunReach.inScripts === removalRunReach.total,
+  `${removalRunReach.total - removalRunReach.inScripts} block(s) were detached from their script by removing write-only stores`);
+const rrBlocks = removalRun.project.targets[0].blocks;
+const rrFlag = Object.keys(rrBlocks).find((id) => rrBlocks[id].opcode === "event_whenflagclicked");
+const rrRepeat = (rrFlag && rrBlocks[rrFlag].next) || null;
+const rrRepeatBlk = rrRepeat ? rrBlocks[rrRepeat] : null;
+check(!!rrRepeatBlk && rrRepeatBlk.opcode === "control_repeat",
+  "the chain after a run of removed stores did not skip to the next surviving block");
+const rrSubstack = (rrRepeatBlk && rrRepeatBlk.inputs.SUBSTACK[1]) || null;
+check(!!rrSubstack && rrBlocks[rrSubstack] && rrBlocks[rrSubstack].opcode === "data_changevariableby",
+  "a substack whose first block was removed was not re-pointed");
+const removalRunTwice = SB3.compressProject(removalRun.project,
+  new SB3.Options({ removeWriteOnly: true }), () => {});
+check(removalRunTwice.stats.unreachable_blocks_removed === 0 &&
+  Object.keys(removalRunTwice.project.targets[0].blocks).length === Object.keys(rrBlocks).length,
+  "a second pass deleted blocks that the first pass had left detached");
+
+/*
+ * 8. Costume references.  `switch costume to (…)` points at a `looks_costume`
+ *    menu block whose field names the costume; when the input is computed at
+ *    run time the switch can land on any costume, so all of them have to stay.
+ *    Dropping a costume also shifts the indices that `currentCostume` counts.
+ */
+function buildCostumeSwitchProject(switchBlock, costumes, currentCostume) {
+  return {
+    targets: [{
+      isStage: false, name: "Sprite1",
+      variables: {}, lists: {}, broadcasts: {},
+      blocks: Object.assign({
+        flag: blk("event_whenflagclicked", { topLevel: true, x: 40, y: 40, next: "switch" }),
+        readX: blk("motion_xposition", { parent: "compute" }),
+        compute: blk("operator_add", {
+          parent: "switch", inputs: { NUM1: [1, [4, "1"]], NUM2: [3, "readX", [4, ""]] }
+        }),
+        menu: blk("looks_costume", { shadow: true, parent: "switch", fields: { COSTUME: ["c", null] } })
+      }, switchBlock),
+      comments: {},
+      currentCostume: currentCostume,
+      costumes: costumes.map((name, i) => ({
+        name, dataFormat: "svg", assetId: String(i + 5).repeat(32),
+        md5ext: String(i + 5).repeat(32) + ".svg", bitmapResolution: 1,
+        rotationCenterX: 0, rotationCenterY: 0
+      })),
+      sounds: [], volume: 100, layerOrder: 0, visible: true, x: 0, y: 0, size: 100,
+      direction: 90, draggable: false, rotationStyle: "all around"
+    }],
+    monitors: [], extensions: [], meta: { semver: "3.0.0" }
+  };
+}
+
+const dynamicSwitch = SB3.compressProject(buildCostumeSwitchProject({
+  switch: blk("looks_switchcostumeto", {
+    parent: "flag", inputs: { COSTUME: [3, "compute", "menu"] }
+  })
+}, ["a", "b", "c"], 1), new SB3.Options({ removeDeadAssets: true }), () => {});
+audit(dynamicSwitch.project);
+check(dynamicSwitch.project.targets[0].costumes.length === 3,
+  `a costume chosen at run time lost ${3 - dynamicSwitch.project.targets[0].costumes.length} costume(s)`);
+check(dynamicSwitch.project.targets[0].currentCostume === 1,
+  "the current costume moved although nothing was dropped");
+
+// A menu input keeps the costume it names, and the current costume keeps its
+// meaning even when a costume in front of it is dropped (the menu names "a",
+// the sprite currently wears "c", so dropping "b" renumbers it).
+const menuSwitch = SB3.compressProject(buildCostumeSwitchProject({
+  switch: blk("looks_switchcostumeto", {
+    parent: "flag", inputs: { COSTUME: [1, "menu"] }
+  }),
+  menu: blk("looks_costume", { shadow: true, parent: "switch", fields: { COSTUME: ["a", null] } })
+}, ["a", "b", "c"], 2), new SB3.Options({ removeDeadAssets: true }), () => {});
+audit(menuSwitch.project);
+const menuTarget = menuSwitch.project.targets[0];
+const menuCostumes = menuTarget.costumes.map((c) => c.name);
+check(menuCostumes.join(",") === "a,c" || menuCostumes.join(",") === "c,a",
+  `expected the current costume and the one the menu names, kept ${JSON.stringify(menuCostumes)}, removed ${menuSwitch.stats.dead_costumes_removed}`);
+check(menuTarget.currentCostume === menuCostumes.indexOf("c"),
+  "currentCostume no longer points at the costume it named");
+
+// A numeric menu value is a 1-based index, not a name: `_setCostume` casts it
+// with Number and `_getSoundIndex` with parseInt, so it can land anywhere.
+const numericCostume = SB3.compressProject(buildCostumeSwitchProject({
+  switch: blk("looks_switchcostumeto", {
+    parent: "flag", inputs: { COSTUME: [1, "menu"] }
+  }),
+  menu: blk("looks_costume", { shadow: true, parent: "switch", fields: { COSTUME: ["2", null] } })
+}, ["a", "b", "c"], 0), new SB3.Options({ removeDeadAssets: true }), () => {});
+check(numericCostume.project.targets[0].costumes.length === 3,
+  "`switch costume to [2]` dropped costumes it can still land on");
+
+function buildSoundProject(menuValue) {
+  return {
+    targets: [{
+      isStage: false, name: "Sprite1",
+      variables: {}, lists: {}, broadcasts: {}, comments: {},
+      blocks: {
+        flag: blk("event_whenflagclicked", { topLevel: true, x: 40, y: 40, next: "play" }),
+        play: blk("sound_play", { parent: "flag", inputs: { SOUND_MENU: [1, "menu"] } }),
+        menu: blk("sound_sounds_menu", {
+          shadow: true, parent: "play",
+          fields: { SOUND_MENU: [String(menuValue), null] }
+        })
+      },
+      currentCostume: 0,
+      costumes: [{
+        name: "costume1", dataFormat: "svg", assetId: "d".repeat(32),
+        md5ext: "d".repeat(32) + ".svg", bitmapResolution: 1, rotationCenterX: 0, rotationCenterY: 0
+      }],
+      sounds: ["one", "two", "three"].map((name, i) => ({
+        name, assetId: String(i + 1).repeat(32), dataFormat: "wav",
+        rate: 48000, sampleCount: 1, md5ext: String(i + 1).repeat(32) + ".wav"
+      })),
+      volume: 100, layerOrder: 0, visible: true, x: 0, y: 0, size: 100,
+      direction: 90, draggable: false, rotationStyle: "all around"
+    }],
+    monitors: [], extensions: [], meta: { semver: "3.0.0" }
+  };
+}
+const numericSound = SB3.compressProject(buildSoundProject("2"),
+  new SB3.Options({ removeDeadAssets: true }), () => {});
+audit(numericSound.project);
+check(numericSound.project.targets[0].sounds.length === 3,
+  "`play sound [2]` dropped sounds it can still reach by index");
+const namedSound = SB3.compressProject(buildSoundProject("two"),
+  new SB3.Options({ removeDeadAssets: true }), () => {});
+audit(namedSound.project);
+const namedSoundNames = namedSound.project.targets[0].sounds.map((s) => s.name);
+check(namedSoundNames.join(",") === "two",
+  `expected only the sound the menu names, kept ${JSON.stringify(namedSoundNames)}`);
+
+/*
+ * 9. What else `removeWriteOnly` and `removeDeadAssets` must not touch.
+ *    Each fixture targets a resolution rule that is easy to get wrong:
+ *      * `control_for_each` owns its variable (the VM re-creates it if the
+ *        store is missing);
+ *      * `sensing_of` reads a scalar variable when PROPERTY is not a sprite
+ *        attribute (`lookupVariableByNameAndType`);
+ *      * a target without a `lists` key still has to lose its writers;
+ *      * the Stage's backdrop list is reachable from every sprite, and
+ *        `next` / `previous` / `random` / numeric or missing names keep it all;
+ *      * `when backdrop switches to [X]` needs X;
+ *      * a sprite named by a menu (`goto`, `touching`, `distance to`, clone,
+ *        `sensing_of`) is not dead;
+ *      * `stripNullFieldIds` / `zeroTopLevelCoords` do not depend on
+ *        `normalizeTypes`;
+ *      * the zip loses the asset files the dead-asset pass dropped.
+ */
+function buildTarget(name, isStage, extra) {
+  return Object.assign({
+    isStage: isStage, name,
+    variables: {}, broadcasts: {},
+    blocks: {}, comments: {},
+    currentCostume: 0,
+    costumes: [{
+      name: isStage ? "backdrop1" : "costume1", dataFormat: "svg",
+      assetId: (isStage ? "c" : "d").repeat(32),
+      md5ext: (isStage ? "c" : "d").repeat(32) + ".svg",
+      bitmapResolution: 1, rotationCenterX: 0, rotationCenterY: 0
+    }],
+    sounds: [], volume: 100, layerOrder: 0, visible: true, x: 0, y: 0, size: 100,
+    direction: 90, draggable: false, rotationStyle: "all around"
+  }, extra || {});
+}
+function buildMiniProject(targets, monitors) {
+  return {
+    targets: targets, monitors: monitors || [],
+    extensions: [], meta: { semver: "3.0.0" }
+  };
+}
+const stageOf = (extra) => buildTarget("Stage", true, extra);
+const findTarget = (project, name) => project.targets.find((t) => t.name === name);
+const opcodesOf = (target) => Object.values(target.blocks || {})
+  .filter((b) => b && !Array.isArray(b)).map((b) => b.opcode);
+
+// A target with no `lists` key at all: the cleanup used to be nested inside
+// `if (isDict(tgt.lists))`, so the store went but its writer stayed behind.
+const noListsRun = SB3.compressProject(buildMiniProject([
+  stageOf(),
+  buildTarget("Sprite1", false, {
+    variables: { DEAD1: ["dead", 0] },
+    blocks: {
+      flag: blk("event_whenflagclicked", { topLevel: true, x: 40, y: 40, next: "setDead" }),
+      setDead: blk("data_setvariableto", {
+        parent: "flag", next: "say",
+        inputs: { VALUE: [1, [4, "1"]] }, fields: { VARIABLE: ["dead", "DEAD1"] }
+      }),
+      say: blk("looks_say", { parent: "setDead", inputs: { MESSAGE: [1, [10, "hi"]] } })
+    }
+  })
+]), new SB3.Options({ removeWriteOnly: true }), () => {});
+audit(noListsRun.project);
+const noListsSprite = findTarget(noListsRun.project, "Sprite1");
+check(!Object.keys(noListsSprite.variables || {}).length,
+  "the write-only store survived because the target has no lists");
+check(!opcodesOf(noListsSprite).includes("data_setvariableto"),
+  "the writer of a removed store survived in a target without lists");
+check(opcodesOf(noListsSprite).includes("looks_say"),
+  "the block after a removed writer was lost");
+
+// `control_for_each` writes its variable every iteration, and a `set` before
+// the loop makes it look write-only to the scanner; removing the store would
+// make the VM recreate it, so both have to stay.
+const loopRun = SB3.compressProject(buildMiniProject([
+  stageOf(),
+  buildTarget("Sprite1", false, {
+    lists: {},
+    variables: { I1: ["i", 0] },
+    blocks: {
+      flag: blk("event_whenflagclicked", { topLevel: true, x: 40, y: 40, next: "setI" }),
+      setI: blk("data_setvariableto", {
+        parent: "flag", next: "loop",
+        inputs: { VALUE: [1, [4, "0"]] }, fields: { VARIABLE: ["i", "I1"] }
+      }),
+      loop: blk("control_for_each", {
+        parent: "setI",
+        inputs: { VALUE: [1, [4, "3"]], SUBSTACK: [2, "say"] },
+        fields: { VARIABLE: ["i", "I1"] }
+      }),
+      say: blk("looks_say", { parent: "loop", inputs: { MESSAGE: [1, [10, "x"]] } })
+    }
+  })
+]), new SB3.Options({ removeWriteOnly: true, shortenIds: false }), () => {});
+audit(loopRun.project);
+const loopSprite = findTarget(loopRun.project, "Sprite1");
+check(!!(loopSprite.variables || {}).I1, "control_for_each lost its loop variable");
+check(opcodesOf(loopSprite).includes("control_for_each"), "control_for_each itself was removed");
+check(opcodesOf(loopSprite).includes("looks_say"), "the body of control_for_each was removed");
+
+// `sensing_of [variable] of [sprite]` reads a scalar variable by name.
+const sensedRun = SB3.compressProject(buildMiniProject([
+  stageOf(),
+  buildTarget("Sprite1", false, {
+    variables: { V1: ["v", 0] },
+    blocks: {
+      flag: blk("event_whenflagclicked", { topLevel: true, x: 40, y: 40, next: "setV" }),
+      setV: blk("data_setvariableto", {
+        parent: "flag",
+        inputs: { VALUE: [1, [4, "7"]] }, fields: { VARIABLE: ["v", "V1"] }
+      })
+    }
+  }),
+  buildTarget("Sprite2", false, {
+    blocks: {
+      flag2: blk("event_whenflagclicked", { topLevel: true, x: 40, y: 40, next: "of" }),
+      of: blk("sensing_of", {
+        parent: "flag2",
+        inputs: { OBJECT: [1, "ofMenu"] },
+        fields: { PROPERTY: ["v", null] }
+      }),
+      ofMenu: blk("sensing_of_object_menu", {
+        shadow: true, parent: "of", fields: { OBJECT: ["Sprite1", null] }
+      })
+    }
+  })
+]), new SB3.Options({ removeWriteOnly: true, removeUnused: true, shortenIds: false }), () => {});
+audit(sensedRun.project);
+const sensedSprite = findTarget(sensedRun.project, "Sprite1");
+check(!!(sensedSprite.variables || {}).V1, "a variable read by sensing_of was removed");
+check(opcodesOf(sensedSprite).includes("data_setvariableto"),
+  "the writer of a variable read by sensing_of was removed");
+
+// ------------------------------------------------------------------
+// Backdrops are shared: a sprite's `next backdrop` changes the Stage.
+function buildBackdropProject(spriteBlocks, stageBlocks, currentCostume) {
+  return buildMiniProject([
+    stageOf({
+      costumes: ["b1", "b2", "b3"].map((name, i) => ({
+        name, dataFormat: "svg", assetId: String(i + 1).repeat(32),
+        md5ext: String(i + 1).repeat(32) + ".svg",
+        bitmapResolution: 1, rotationCenterX: 0, rotationCenterY: 0
+      })),
+      currentCostume: currentCostume || 0,
+      blocks: stageBlocks || {}
+    }),
+    buildTarget("Sprite1", false, { blocks: spriteBlocks })
+  ]);
+}
+const nextBackdropRun = SB3.compressProject(buildBackdropProject({
+  flag: blk("event_whenflagclicked", { topLevel: true, x: 40, y: 40, next: "next" }),
+  next: blk("looks_nextbackdrop", { parent: "flag" })
+}), new SB3.Options({ removeDeadAssets: true }), () => {});
+check(findTarget(nextBackdropRun.project, "Stage").costumes.length === 3,
+  "a sprite's `next backdrop` did not keep the Stage's backdrops");
+
+function backdropSwitchRun(name) {
+  return SB3.compressProject(buildBackdropProject({
+    flag: blk("event_whenflagclicked", { topLevel: true, x: 40, y: 40, next: "sw" }),
+    sw: blk("looks_switchbackdropto", { parent: "flag", inputs: { BACKDROP: [1, "menu"] } }),
+    menu: blk("looks_backdrops", { shadow: true, parent: "sw", fields: { BACKDROP: [name, null] } })
+  }), new SB3.Options({ removeDeadAssets: true }), () => {});
+}
+const namedBackdrop = backdropSwitchRun("b2");
+audit(namedBackdrop.project);
+const namedNames = findTarget(namedBackdrop.project, "Stage").costumes.map((c) => c.name);
+check(namedNames.join(",") === "b1,b2",
+  `a backdrop the sprite names (and the current one) were not the only survivors: ${namedNames}`);
+for (const tricky of ["random backdrop", "next backdrop", "previous backdrop", "2"]) {
+  const run = backdropSwitchRun(tricky);
+  check(findTarget(run.project, "Stage").costumes.length === 3,
+    `\`switch backdrop to [${tricky}]\` dropped backdrops that it can still land on`);
+}
+const hatBackdrop = SB3.compressProject(buildMiniProject([
+  stageOf({
+    costumes: ["b1", "b2", "b3"].map((name, i) => ({
+      name, dataFormat: "svg", assetId: String(i + 1).repeat(32),
+      md5ext: String(i + 1).repeat(32) + ".svg",
+      bitmapResolution: 1, rotationCenterX: 0, rotationCenterY: 0
+    })),
+    blocks: {
+      hat: blk("event_whenbackdropswitchesto", {
+        topLevel: true, x: 40, y: 40, fields: { BACKDROP: ["b3", null] }
+      })
+    }
+  })
+]), new SB3.Options({ removeDeadAssets: true }), () => {});
+const hatNames = findTarget(hatBackdrop.project, "Stage").costumes.map((c) => c.name);
+check(hatNames.includes("b3"), "the backdrop a `when backdrop switches to` hat needs was removed");
+
+// A sprite another script names is alive even when it is invisible and empty.
+function spriteRefProject(reference) {
+  const sprite2 = { blocks: {} };
+  if (reference) {
+    Object.assign(sprite2, {
+      blocks: {
+        flag: blk("event_whenflagclicked", { topLevel: true, x: 40, y: 40, next: "go" }),
+        go: blk("motion_goto", { parent: "flag", inputs: { TO: [1, "goMenu"] } }),
+        goMenu: blk("motion_goto_menu", { shadow: true, parent: "go", fields: { TO: ["Sprite1", null] } })
+      }
+    });
+  }
+  return buildMiniProject([
+    stageOf(),
+    buildTarget("Sprite1", false, { visible: false }),
+    buildTarget("Sprite2", false, sprite2)
+  ]);
+}
+const namedSprite = SB3.compressProject(spriteRefProject(true),
+  new SB3.Options({ removeDeadAssets: true }), () => {});
+check(!!findTarget(namedSprite.project, "Sprite1"),
+  "a sprite named by `go to [sprite]` was removed");
+const unnamedSprite = SB3.compressProject(spriteRefProject(false),
+  new SB3.Options({ removeDeadAssets: true }), () => {});
+check(!findTarget(unnamedSprite.project, "Sprite1"),
+  "an invisible, scriptless, unreferenced sprite was not removed");
+
+// A reporter in the menu can name any sprite, so none of them is dead.
+const dynamicSpriteRun = SB3.compressProject(buildMiniProject([
+  stageOf(),
+  buildTarget("Sprite1", false, { visible: false }),
+  buildTarget("Sprite2", false, {
+    blocks: {
+      flag: blk("event_whenflagclicked", { topLevel: true, x: 40, y: 40, next: "go" }),
+      go: blk("motion_goto", { parent: "flag", inputs: { TO: [1, "nameJoin"] } }),
+      nameJoin: blk("operator_join", {
+        parent: "go",
+        inputs: { STRING1: [1, [10, "Sprite"]], STRING2: [1, [10, "1"]] }
+      })
+    }
+  })
+]), new SB3.Options({ removeDeadAssets: true }), () => {});
+check(!!findTarget(dynamicSpriteRun.project, "Sprite1"),
+  "a sprite that a computed `go to` menu can still name was removed");
+
+// The two cheap representations do not need `normalizeTypes`.
+const repRun = SB3.compressProject(buildMiniProject([
+  stageOf(),
+  buildTarget("Sprite1", false, {
+    blocks: {
+      flag: blk("event_whenflagclicked", { topLevel: true, x: 123, y: 456, next: "sw" }),
+      sw: blk("looks_switchcostumeto", {
+        parent: "flag", inputs: { COSTUME: [1, "menu"] },
+        fields: { COSTUME: ["costume1", null] }
+      }),
+      menu: blk("looks_costume", {
+        shadow: true, parent: "sw", fields: { COSTUME: ["costume1", null], NUMBER_NAME: ["number", null] }
+      })
+    }
+  })
+]), new SB3.Options({
+  normalizeTypes: false, stripNullFieldIds: true, zeroTopLevelCoords: true,
+  shortenIds: false
+}), () => {});
+const repSprite = findTarget(repRun.project, "Sprite1");
+const repMenu = Object.values(repSprite.blocks).find((b) => b && b.opcode === "looks_costume");
+check(repMenu && Array.isArray(repMenu.fields.NUMBER_NAME) && repMenu.fields.NUMBER_NAME.length === 1,
+  "stripNullFieldIds did nothing without normalizeTypes");
+const repFlag = Object.keys(repSprite.blocks).find((id) => repSprite.blocks[id].opcode === "event_whenflagclicked");
+check(repFlag && repSprite.blocks[repFlag].x === 0 && repSprite.blocks[repFlag].y === 0,
+  "zeroTopLevelCoords did nothing without normalizeTypes");
+check(repRun.stats.md5ext_removed === 0 && repRun.stats.numeric_strings_normalized === 0,
+  "normalizeTypes was applied even though it is off");
+
+// The zip has to lose the files the dead-asset pass dropped, or the project
+// only gets smaller as JSON.
+const assetIdStage = "a".repeat(32);
+const assetIdSprite = "b".repeat(32);
+const assetIdDead = "e".repeat(32);
+const zipProject = buildMiniProject([
+  stageOf({
+    costumes: [{
+      name: "backdrop1", dataFormat: "svg", assetId: assetIdStage,
+      md5ext: assetIdStage + ".svg", bitmapResolution: 1, rotationCenterX: 0, rotationCenterY: 0
+    }]
+  }),
+  buildTarget("Sprite1", false, {
+    costumes: [{
+      name: "costume1", dataFormat: "svg", assetId: assetIdSprite,
+      md5ext: assetIdSprite + ".svg", bitmapResolution: 1, rotationCenterX: 0, rotationCenterY: 0
+    }]
+  })
+]);
+const zip = new JSZip();
+zip.file("project.json", JSON.stringify(zipProject));
+zip.file(assetIdStage + ".svg", "<svg/>");
+zip.file(assetIdSprite + ".svg", "<svg/>");
+zip.file(assetIdDead + ".svg", "<svg/>");
+zip.file("notes/readme.txt", "keep me");
+const zipBytes = await zip.generateAsync({ type: "uint8array" });
+const prunedZip = await SB3.compressBuffer(zipBytes, "p.sb3",
+  new SB3.Options({ removeDeadAssets: true }), () => {});
+const prunedNames = Object.keys((await JSZip.loadAsync(prunedZip.finalBytes)).files).sort();
+check(!prunedNames.includes(assetIdDead + ".svg"),
+  "an asset file no costume or sound names survived in the zip");
+check(prunedNames.includes(assetIdStage + ".svg") && prunedNames.includes(assetIdSprite + ".svg"),
+  "a live asset file was dropped from the zip");
+check(prunedNames.includes("notes/readme.txt"),
+  "a non-asset entry next to project.json was dropped from the zip");
+const untouchedZip = await SB3.compressBuffer(zipBytes, "p.sb3", new SB3.Options({}), () => {});
+const untouchedNames = Object.keys((await JSZip.loadAsync(untouchedZip.finalBytes)).files);
+check(untouchedNames.includes(assetIdDead + ".svg"),
+  "asset files were pruned although removeDeadAssets is off");
+
+// A monitor is tied to a store by id: another sprite's same-named local
+// variable must keep its own monitor.
+const monRun = SB3.compressProject(buildMiniProject([
+  stageOf(),
+  buildTarget("SpriteA", false, {
+    lists: {},
+    variables: { AX: ["x", 0] },
+    blocks: {
+      flagA: blk("event_whenflagclicked", { topLevel: true, x: 40, y: 40, next: "setA" }),
+      setA: blk("data_setvariableto", {
+        parent: "flagA", inputs: { VALUE: [1, [4, "1"]] }, fields: { VARIABLE: ["x", "AX"] }
+      })
+    }
+  }),
+  buildTarget("SpriteB", false, {
+    lists: {},
+    variables: { BX: ["x", 0] },
+    blocks: {
+      flagB: blk("event_whenflagclicked", { topLevel: true, x: 40, y: 40, next: "setB" }),
+      setB: blk("data_setvariableto", {
+        parent: "flagB", inputs: { VALUE: [1, [4, "2"]] }, fields: { VARIABLE: ["x", "BX"] }
+      })
+    }
+  })
+], [
+  { id: "AX", opcode: "data_variable", params: { VARIABLE: "x" }, spriteName: "SpriteA",
+    x: 1, y: 2, visible: false, mode: "default", width: 0, height: 0,
+    sliderMin: 0, sliderMax: 100, isDiscrete: true },
+  { id: "BX", opcode: "data_variable", params: { VARIABLE: "x" }, spriteName: "SpriteB",
+    x: 3, y: 4, visible: true, mode: "default", width: 0, height: 0,
+    sliderMin: 0, sliderMax: 100, isDiscrete: true }
+]), new SB3.Options({ removeWriteOnly: true, removeMonitors: true, shortenIds: false }), () => {});
+const monIds = (monRun.project.monitors || []).map((m) => m.id);
+check(!monIds.includes("AX"), "the monitor of a removed write-only store survived");
+check(monIds.includes("BX"), "another sprite's same-named variable lost its monitor");
+check(!!(findTarget(monRun.project, "SpriteB").variables || {}).BX,
+  "a visible monitor's variable was removed");
 
 if (failures) {
   console.error(`\n${failures} check(s) failed`);

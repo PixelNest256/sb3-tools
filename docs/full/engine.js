@@ -97,7 +97,12 @@
 
     // 3. repack once
     report("package", 0.2, "Repacking .sb3...");
-    const finalBytes = await packageSb3(mediaOut.entries, pjBytes, report);
+    // Dead costumes/sounds only shorten project.json; the zip still holds their
+    // bytes unless the entries are filtered with the surviving asset names.
+    const entries = comp.options.removeDeadAssets
+      ? G.SB3.pruneAssetEntries(mediaOut.entries, outProject)
+      : mediaOut.entries;
+    const finalBytes = await packageSb3(entries, pjBytes, report);
 
     const origFileSize = mediaOut.origFileSize;
     return {
