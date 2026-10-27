@@ -209,6 +209,20 @@ function audit(project) {
   for (const t of project.targets) {
     const blocks = t.blocks || {};
     const ids = new Set(Object.keys(blocks));
+    // A reporter may sit in an expression socket; a stack block may not.  A
+    // stack block is linked through `next` (incoming or outgoing) or occupies a
+    // SUBSTACK, and a reporter has none of those links, so a reporter in a
+    // value socket is identifiable from the links alone.
+    const nextTargets = new Set();
+    const substackTargets = new Set();
+    for (const b of Object.values(blocks)) {
+      if (Array.isArray(b) || !b || typeof b !== "object") continue;
+      if (typeof b.next === "string" && b.next) nextTargets.add(b.next);
+      for (const key of ["SUBSTACK", "SUBSTACK2"]) {
+        const value = (b.inputs || {})[key];
+        if (Array.isArray(value) && typeof value[1] === "string") substackTargets.add(value[1]);
+      }
+    }
     for (const [bid, b] of Object.entries(blocks)) {
       if (Array.isArray(b) || !b || typeof b !== "object") continue;
       if (b.mutation) {
@@ -224,6 +238,15 @@ function audit(project) {
         if (!Array.isArray(value)) continue;
         if ((value[0] === 1 || value[0] === 2 || value[0] === 3) && typeof value[1] === "string" && !ids.has(value[1])) {
           issues.push(`${bid}.${key}: input points at missing block ${value[1]}`);
+        }
+        if (key !== "SUBSTACK" && key !== "SUBSTACK2" &&
+            (value[0] === 2 || value[0] === 3) && typeof value[1] === "string") {
+          const ref = blocks[value[1]];
+          if (ref && !Array.isArray(ref)) {
+            const linked = (typeof ref.next === "string" && ref.next) ||
+              nextTargets.has(value[1]) || substackTargets.has(value[1]);
+            if (linked) issues.push(`${bid}.${key}: expression socket holds a stack block ${value[1]}`);
+          }
         }
       }
       for (const [fk, fv] of Object.entries(b.fields || {})) {
@@ -930,6 +953,85 @@ const repeatOff = SB3.compressProject(buildRepeatReporterProject(), new SB3.Opti
   })), () => {});
 check(repeatOff.stats.optimization_passes === 1,
   "the loop ran extra passes with all three repeatable steps disabled");
+
+/*
+ * 4b. Reporter reuse must never splice a setter into an expression socket.
+ *
+ *     A reporter that only appears inside `control_repeat_until`'s CONDITION
+ *     has no statement that runs before it, so caching its value would have to
+ *     point the CONDITION at a `data_setvariableto` block.  That block is a
+ *     stack block and scratch-vm's compiler rejects the whole script with
+ *     "IR: Unknown input: data_setvariableto", then falls back to the
+ *     interpreter (visible as stutter in the player).  The repeated reporter
+ *     here lives only in the CONDITION, so nothing may be cached.
+ */
+function buildConditionReporterProject() {
+  const VID = "variableLongIdForCondition01";
+  const blocks = {
+    hat: blk("event_whenflagclicked", { topLevel: true, x: 0, y: 0, next: "rep" })
+  };
+  const makeCmp = (tag, parentId) => {
+    blocks[`${tag}_eq`] = blk("operator_equals", {
+      parent: parentId,
+      inputs: { OPERAND1: [3, `${tag}_j0`, [10, ""]], OPERAND2: [1, [10, "1"]] }
+    });
+    for (let d = 0; d < 6; d++) {
+      blocks[`${tag}_j${d}`] = blk("operator_join", {
+        parent: d === 0 ? `${tag}_eq` : `${tag}_j${d - 1}`,
+        inputs: {
+          STRING1: [3, d === 5 ? `${tag}_var` : `${tag}_j${d + 1}`, [10, ""]],
+          STRING2: [1, [10, `chunk-${d}-padding`]]
+        }
+      });
+    }
+    blocks[`${tag}_var`] = blk("data_variable", {
+      parent: `${tag}_j5`, fields: { VARIABLE: ["x", VID] }
+    });
+  };
+  makeCmp("cmpA", "or1");
+  makeCmp("cmpB", "or1");
+  blocks.or1 = blk("operator_or", {
+    parent: "rep",
+    inputs: { OPERAND1: [2, "cmpA_eq"], OPERAND2: [2, "cmpB_eq"] }
+  });
+  blocks.rep = blk("control_repeat_until", {
+    parent: "hat", next: "after",
+    inputs: { CONDITION: [2, "or1"], SUBSTACK: [2, "body"] }
+  });
+  blocks.body = blk("looks_say", { parent: "rep", inputs: { MESSAGE: [1, [10, "in"]] } });
+  blocks.after = blk("looks_say", { parent: "rep", inputs: { MESSAGE: [1, [10, "out"]] } });
+  return {
+    targets: [{
+      isStage: false, name: "Sprite1",
+      variables: { [VID]: ["x", 0] }, lists: {}, broadcasts: {},
+      blocks, comments: {}, currentCostume: 0,
+      costumes: [{
+        name: "c", dataFormat: "svg", assetId: "0".repeat(32),
+        md5ext: "0".repeat(32) + ".svg", bitmapResolution: 1,
+        rotationCenterX: 10, rotationCenterY: 10
+      }],
+      sounds: [], volume: 100, layerOrder: 0, visible: true, x: 0, y: 0, size: 100,
+      direction: 90, draggable: false, rotationStyle: "all around"
+    }],
+    monitors: [], extensions: [], meta: { semver: "3.0.0" }
+  };
+}
+
+const condOnce = SB3.compressProject(buildConditionReporterProject(), new SB3.Options(repeatBase), () => {});
+audit(condOnce.project);
+const condBlocks = condOnce.project.targets[0].blocks;
+const condRepeat = Object.values(condBlocks)
+  .find((b) => b && !Array.isArray(b) && b.opcode === "control_repeat_until");
+check(!!condRepeat, "the condition fixture lost its repeat_until block");
+const condRef = condRepeat
+  ? (condRepeat.inputs.CONDITION || [])[1] : null;
+const condRead = condRef ? condBlocks[condRef] : null;
+check(!!condRead && condRead.opcode === "operator_or",
+  "reporter reuse replaced the repeat_until CONDITION with a stack block");
+check(!!condRead && condRead.next == null,
+  "the CONDITION reporter was spliced into a stack chain");
+check(condOnce.stats.reporter_values_cached === 0,
+  "a reporter that only appears in a reevaluated CONDITION was cached");
 
 /*
  * 5. Store scoping across targets.  scratch-vm resolves a store id in the

@@ -2926,12 +2926,28 @@
 
     _reporterChains(blocks) {
       const nextTargets = new Set();
+      // A block referenced from an expression socket is not a statement: it has
+      // no `next` slot and cannot be spliced into a stack.  Without this set a
+      // reporter sitting in, say, `control_repeat_until.CONDITION` starts its
+      // own one-block "chain", and reuse would later insert a
+      // `data_setvariableto` in front of it by rewriting that socket, which
+      // corrupts the project.
+      const exprRefs = new Set();
       for (const blk of Object.values(blocks)) {
-        if (isDict(blk) && isStr(blk.next) && has(blocks, blk.next)) nextTargets.add(blk.next);
+        if (!isDict(blk)) continue;
+        if (isStr(blk.next) && has(blocks, blk.next)) nextTargets.add(blk.next);
+        if (!isDict(blk.inputs)) continue;
+        for (const [key, entry] of Object.entries(blk.inputs)) {
+          if (key === "SUBSTACK" || key === "SUBSTACK2") continue;
+          if (!isArr(entry) || (entry[0] !== 2 && entry[0] !== 3)) continue;
+          if (isStr(entry[1])) exprRefs.add(entry[1]);
+        }
       }
       const chains = [];
       for (const bid of Object.keys(blocks)) {
         if (!isDict(blocks[bid]) || nextTargets.has(bid)) continue;
+        if (exprRefs.has(bid)) continue;
+        if (blocks[bid].shadow === true) continue;
         const ids = this._chainIds(blocks, bid, 1000000);
         if (ids.length) chains.push({ head: bid, ids });
       }
@@ -3371,22 +3387,32 @@
 
       const parentId = stmt.parent;
       const parent = isStr(parentId) && has(blocks, parentId) ? blocks[parentId] : null;
+      // Only a statement may get a setter spliced in front of it.  `stmt` can
+      // still be a reporter whose parent is a control block when a malformed or
+      // hand-authored project reuses an id; refuse rather than rewrite an
+      // expression socket into a stack slot.
+      const parentNext = isDict(parent) && parent.next === stmtId;
+      let parentKey = null;
+      if (isDict(parent) && !parentNext && isDict(parent.inputs)) {
+        for (const key of ["SUBSTACK", "SUBSTACK2"]) {
+          const entry = parent.inputs[key];
+          if (isArr(entry) && entry.length > 1 && entry[1] === stmtId) {
+            parentKey = key;
+            break;
+          }
+        }
+      }
+      if (!parentNext && !parentKey && stmt.topLevel !== true) return null;
       let linked = false;
       if (isDict(parent)) {
-        if (parent.next === stmtId) {
+        if (parentNext) {
           parent.next = setId;
           setBlk.parent = parentId;
           linked = true;
-        }
-        if (!linked && isDict(parent.inputs)) {
-          for (const entry of Object.values(parent.inputs)) {
-            if (isArr(entry) && entry.length > 1 && entry[1] === stmtId) {
-              entry[1] = setId;
-              setBlk.parent = parentId;
-              linked = true;
-              break;
-            }
-          }
+        } else if (parentKey) {
+          parent.inputs[parentKey][1] = setId;
+          setBlk.parent = parentId;
+          linked = true;
         }
       }
       if (!linked) {
