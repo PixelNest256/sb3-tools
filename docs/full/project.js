@@ -65,6 +65,24 @@
     "sensing_username", "sensing_online"
   ]);
   const REUSE_PURE_REPORTER_OPS = REUSE_REPORTER_OPS;
+  // `_reuseReporters` replaces a repeated reporter with a `data_variable`
+  // read, which scratch-blocks declares as `output_string`.  These are the
+  // only value inputs that carry a hard `check: "Boolean"` (every other value
+  // input has no check and accepts a String reporter).  Dropping the read into
+  // one of them makes `Blockly.Xml.domToWorkspace` throw "expected Boolean,
+  // found String" and abandon the rest of the target's scripts, so those
+  // occurrences are left untouched.  A `procedures_call` input is typed from
+  // its `%b` argument and is handled separately.
+  const BOOLEAN_INPUTS = new Map([
+    ["operator_and", new Set(["OPERAND1", "OPERAND2"])],
+    ["operator_or", new Set(["OPERAND1", "OPERAND2"])],
+    ["operator_not", new Set(["OPERAND"])],
+    ["control_if", new Set(["CONDITION"])],
+    ["control_if_else", new Set(["CONDITION"])],
+    ["control_wait_until", new Set(["CONDITION"])],
+    ["control_repeat_until", new Set(["CONDITION"])],
+    ["control_while", new Set(["CONDITION"])]
+  ]);
   const REUSE_YIELD_OPS = new Set([
     "control_wait", "control_wait_until", "event_broadcastandwait",
     "sensing_askandwait", "motion_glidesecstoxy", "motion_glideto",
@@ -497,11 +515,95 @@
       }
       if (extra) this.progress("targets", 1.0, "Optimizations complete");
       if (this.cancelled()) throw new Error("Cancelled");
+      // The per-target numbering above restarts at "A" in every target, so two
+      // targets routinely use the same block id.  The editor keeps one global
+      // block-id registry: when it loads a workspace whose ids are already
+      // registered, Blockly hands the block a fresh random id and TurboWarp
+      // writes that copy back, so every revisit duplicates the target's
+      // scripts (and the VM then runs both).  Renumber the whole project once,
+      // most-referenced id first, so ids stay short where they cost the most.
+      if (o.shortenIds) this._uniqueBlockIds(targets);
       this.progress("finalize", 0.5, "Processing monitors and metadata...");
       this._processMonitors(project);
       this._processRoot(project);
       this.progress("finalize", 1.0, "Done");
       return project;
+    }
+
+    _uniqueBlockIds(targets) {
+      const freq = this.options.freqIds;
+      const groups = [];
+      let pos = 0;
+      for (const tgt of targets) {
+        if (!isDict(tgt) || !isDict(tgt.blocks)) continue;
+        const blocks = tgt.blocks;
+        const counts = new Map();
+        const first = new Map();
+        const touch = (id) => {
+          if (!isStr(id)) return;
+          if (counts.has(id)) counts.set(id, counts.get(id) + 1);
+          else { counts.set(id, 1); first.set(id, pos++); }
+        };
+        for (const [id, blk] of Object.entries(blocks)) {
+          touch(id);
+          if (!isDict(blk)) continue;
+          if (isStr(blk.parent)) touch(blk.parent);
+          if (isStr(blk.next)) touch(blk.next);
+          if (!isDict(blk.inputs)) continue;
+          for (const entry of Object.values(blk.inputs)) {
+            if (!isArr(entry)) continue;
+            for (let i = 1; i < entry.length; i++) {
+              if (isStr(entry[i])) touch(entry[i]);
+            }
+          }
+        }
+        groups.push({ tgt, blocks, counts, first });
+      }
+      if (!groups.length) return;
+
+      const pairs = [];
+      for (let gi = 0; gi < groups.length; gi++) {
+        for (const [id, count] of groups[gi].counts) {
+          pairs.push({ gi, id, count, first: groups[gi].first.get(id) });
+        }
+      }
+      pairs.sort((a, b) =>
+        (freq ? (b.count - a.count) : 0) || (a.gi - b.gi) || (a.first - b.first));
+      const maps = groups.map(() => new Map());
+      for (let i = 0; i < pairs.length; i++) {
+        maps[pairs[i].gi].set(pairs[i].id, encodeId(i + 1));
+      }
+
+      for (let gi = 0; gi < groups.length; gi++) {
+        const { tgt, blocks } = groups[gi];
+        const map = maps[gi];
+        const out = {};
+        for (const [id, blk] of Object.entries(blocks)) {
+          if (isDict(blk)) {
+            if (isStr(blk.parent) && map.has(blk.parent)) blk.parent = map.get(blk.parent);
+            if (isStr(blk.next) && map.has(blk.next)) blk.next = map.get(blk.next);
+            if (isDict(blk.inputs)) {
+              for (const entry of Object.values(blk.inputs)) {
+                if (!isArr(entry)) continue;
+                for (let i = 1; i < entry.length; i++) {
+                  if (isStr(entry[i]) && map.has(entry[i])) entry[i] = map.get(entry[i]);
+                }
+              }
+            }
+          }
+          out[map.get(id)] = blk;
+        }
+        if (Object.keys(out).length !== Object.keys(blocks).length) {
+          throw new CompressError("Internal error: block ID collision during global renaming");
+        }
+        tgt.blocks = out;
+        if (isDict(tgt.comments)) {
+          for (const com of Object.values(tgt.comments)) {
+            if (!isDict(com) || !isStr(com.blockId)) continue;
+            if (map.has(com.blockId)) com.blockId = map.get(com.blockId);
+          }
+        }
+      }
     }
 
     // Total of the counters the repeatable steps touch.  If a pass leaves it
@@ -766,9 +868,29 @@
     // sends or receives, which leaves a gap in the sequence ("A".."D", "F").
     // Renumber the survivors once the removals are done.  A broadcast's id and
     // name may be the same string, so one counter drives both.
+    //
+    // Variables, lists and broadcasts must not share an id.  Scratch keeps a
+    // single variable map per Blockly workspace (the stage variables and
+    // broadcasts live in it, and every sprite workspace also holds the stage
+    // globals), so `Blockly.Xml` rejects a field whose id belongs to another
+    // kind with "Serialized variable type ... does not match variable field",
+    // aborting the rest of `domToWorkspace`.  Half the scripts then go missing
+    // from the editor even though the VM loads the project fine.
     _compactBroadcasts(targets) {
       const renameStores = this.options.renameStores;
+      const taken = new Set();
+      for (const m of this.varMap.values()) taken.add(m[0]);
+      for (const m of this.listMap.values()) taken.add(m[0]);
       let seq = 0;
+      const nextId = () => {
+        let id;
+        do {
+          seq += 1;
+          id = encodeId(seq);
+        } while (taken.has(id));
+        taken.add(id);
+        return id;
+      };
       this.bcMap = new Map();
       this.bcByName = new Map();
       for (const tgt of targets) {
@@ -776,7 +898,7 @@
         const broadcasts = isDict(tgt.broadcasts) ? tgt.broadcasts : {};
         for (const [bid, ent] of Object.entries(broadcasts)) {
           const name = isArr(ent) && ent.length ? ent[0] : ent;
-          const short = encodeId(++seq);
+          const short = nextId();
           const mapping = [short, renameStores ? short : name];
           this.bcMap.set(bid, mapping);
           if (!this.bcByName.has(name)) this.bcByName.set(name, mapping);
@@ -2553,6 +2675,12 @@
           if (!lmap.has(name)) lmap.set(name, new Set());
           lmap.get(name).add(id);
         }
+        // Broadcasts are variables in the editor's variable map.  A temp store
+        // that took a broadcast id would make `Blockly.Xml` reject the field
+        // and drop the rest of the workspace, so reserve them here too.
+        for (const id of Object.keys(isDict(tgt.broadcasts) ? tgt.broadcasts : {})) {
+          storeIds.add(id);
+        }
         if (isStr(tgt.name)) {
           varsByTarget.set(tgt.name, vmap);
           listsByTarget.set(tgt.name, lmap);
@@ -2845,13 +2973,17 @@
       if (!isDict(stmt) || !isDict(stmt.inputs)) return;
       const seen = new Set();
       let order = 0;
-      const visit = (bid, parentId, entry, itemIndex) => {
+      const visit = (bid, parentId, entry, itemIndex, inputKey) => {
         if (!isStr(bid) || seen.has(bid) || !has(blocks, bid)) return;
         seen.add(bid);
         const blk = blocks[bid];
         if (!isDict(blk)) return;
         order += 1;
-        if (blk.shadow !== true && blk.topLevel !== true) {
+        // A Boolean socket only takes a Boolean reporter, so the cached read
+        // cannot go here.  Its own inputs are ordinary value sockets, so keep
+        // descending and only skip this one block.
+        const booleanSocket = this._inputTakesBoolean(blocks[parentId], inputKey);
+        if (!booleanSocket && blk.shadow !== true && blk.topLevel !== true) {
           let info = memo.get(bid);
           if (info === undefined) {
             info = this._reporterCandidateRoot(blocks, bid, ctx, canonCache);
@@ -2869,7 +3001,7 @@
           if (key === "SUBSTACK" || key === "SUBSTACK2") continue;
           if (!isArr(childEntry)) continue;
           for (let i = 1; i < childEntry.length; i++) {
-            if (isStr(childEntry[i])) visit(childEntry[i], bid, childEntry, i);
+            if (isStr(childEntry[i])) visit(childEntry[i], bid, childEntry, i, key);
           }
         }
       };
@@ -2878,9 +3010,38 @@
         if (this._reporterInputReevaluated(stmt, key)) continue;
         if (!isArr(entry)) continue;
         for (let i = 1; i < entry.length; i++) {
-          if (isStr(entry[i])) visit(entry[i], stmtId, entry, i);
+          if (isStr(entry[i])) visit(entry[i], stmtId, entry, i, key);
         }
       }
+    }
+
+    // True when the socket `key` of `blk` only accepts a Boolean reporter.
+    // Custom block inputs are named by argument id, and their type comes from
+    // the `%b` markers in the call's own proc code.
+    _inputTakesBoolean(blk, key) {
+      if (!isDict(blk) || !isStr(key)) return false;
+      const keys = BOOLEAN_INPUTS.get(blk.opcode);
+      if (keys) return keys.has(key);
+      if (blk.opcode !== "procedures_call") return false;
+      const mutation = blk.mutation;
+      if (!isDict(mutation) || !isStr(mutation.proccode) || !isStr(mutation.argumentids)) return false;
+      let ids;
+      try {
+        ids = JSON.parse(mutation.argumentids);
+      } catch (err) {
+        return false;
+      }
+      if (!isArr(ids)) return false;
+      const parts = mutation.proccode.split(/(?=[^\\]%[nbs])/);
+      let arg = 0;
+      for (const part of parts) {
+        const piece = part.trim();
+        const type = piece.charAt(0) === "%" ? piece.charAt(1) : "";
+        if (type !== "n" && type !== "b" && type !== "s") continue;
+        if (type === "b" && ids[arg] === key) return true;
+        arg += 1;
+      }
+      return false;
     }
 
     _reporterInputReevaluated(stmt, key) {

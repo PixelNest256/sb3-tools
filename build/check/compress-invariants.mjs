@@ -28,11 +28,14 @@
  *   8. removing a run of blocks (adjacent write-only stores) re-points every
  *      link past the whole run, so no block ends up detached from its script;
  *   9. a costume chosen at run time (or named by a menu) survives, and
- *      `currentCostume` still points at the costume it named.
+ *      `currentCostume` still points at the costume it named;
+ *  10. block ids are unique across targets and still form the shortest global
+ *      sequence.
  *
  * Invariants 1-3 were broken by "remove legacy mutation keys"; 4 by clearing
  * every overwritten value; 5 by "shorten internal IDs" and by near-duplicate
- * merging; 8 and 9 by "remove write-only variables" and "remove dead assets".
+ * merging; 8 and 9 by "remove write-only variables" and "remove dead assets";
+ * 10 by numbering block ids per target while Blockly keeps one global registry.
  * All of these reached users and made projects fail to load or behave
  * differently.
  */
@@ -1676,6 +1679,64 @@ check(!monIds.includes("AX"), "the monitor of a removed write-only store survive
 check(monIds.includes("BX"), "another sprite's same-named variable lost its monitor");
 check(!!(findTarget(monRun.project, "SpriteB").variables || {}).BX,
   "a visible monitor's variable was removed");
+
+/*
+ * 10. Block ids are unique across the whole project.  `shortenIds` numbers each
+ *     target from "A" again, so a stage script and a sprite script of the same
+ *     shape used to share ids.  Blockly keeps one global block-id registry, so
+ *     on the second visit to a target it handed every colliding block a fresh
+ *     random id; TurboWarp then saved that copy back, and the VM ended up
+ *     running two copies of the script (and the editor showed the duplicate).
+ */
+const idRun = SB3.compressProject(buildMiniProject([
+  stageOf({
+    blocks: {
+      stageFlag: blk("event_whenflagclicked", { topLevel: true, x: 0, y: 0, next: "stageSay" }),
+      stageSay: blk("looks_say", { parent: "stageFlag", inputs: { MESSAGE: [1, [10, "stage"]] } })
+    }
+  }),
+  buildTarget("Sprite1", false, {
+    blocks: {
+      spriteFlag: blk("event_whenflagclicked", { topLevel: true, x: 40, y: 40, next: "spriteSay" }),
+      spriteSay: blk("looks_say", { parent: "spriteFlag", inputs: { MESSAGE: [1, [10, "sprite"]] } })
+    }
+  })
+]), new SB3.Options({ shortenIds: true, freqIds: true }), () => {});
+const seenIds = new Map();
+const allIds = [];
+for (const t of idRun.project.targets) {
+  const blocks = t.blocks || {};
+  for (const [bid, b] of Object.entries(blocks)) {
+    if (seenIds.has(bid)) {
+      check(false, `block id ${JSON.stringify(bid)} is used by ${seenIds.get(bid)} and ${t.name}`);
+    } else {
+      seenIds.set(bid, t.name);
+    }
+    allIds.push(bid);
+    if (Array.isArray(b) || !b) continue;
+    if (b.parent != null && !blocks[b.parent]) check(false, `${t.name}/${bid}: parent lost in renaming`);
+    if (b.next != null && !blocks[b.next]) check(false, `${t.name}/${bid}: next lost in renaming`);
+    for (const entry of Object.values(b.inputs || {})) {
+      if (!Array.isArray(entry)) continue;
+      for (let i = 1; i < entry.length; i += 1) {
+        if (typeof entry[i] === "string" && !blocks[entry[i]]) {
+          check(false, `${t.name}/${bid}: input target lost in renaming`);
+        }
+      }
+    }
+  }
+}
+// Renumbering must stay the shortest sequence: "A", "B", ... with no gaps, or
+// the pass would trade the size win for the fix.
+const shortSequence = new Set();
+for (let n = 1; shortSequence.size < allIds.length; n += 1) {
+  let v = n, id = "";
+  while (v > 0) { const r = (v - 1) % 62; v = Math.floor((v - 1) / 62); id = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789"[r] + id; }
+  shortSequence.add(id);
+}
+for (const id of allIds) {
+  if (!shortSequence.has(id)) check(false, `block id ${JSON.stringify(id)} is outside the shortest global sequence`);
+}
 
 if (failures) {
   console.error(`\n${failures} check(s) failed`);
