@@ -30,13 +30,26 @@
  *   9. a costume chosen at run time (or named by a menu) survives, and
  *      `currentCostume` still points at the costume it named;
  *  10. block ids are unique across targets and still form the shortest global
- *      sequence.
+ *      sequence;
+ *  11. a near-duplicate signature covers the whole subtree that the merge
+ *      copies, including a C-block's SUBSTACK chain, so two `if` blocks whose
+ *      bodies differ are not merged and neither body is thrown away;
+ *  12. `propagateConstants` resolves a variable reference in the scope that
+ *      will run it (the sprite, then the stage), because two sprites may reuse
+ *      one variable id for unrelated locals; a store keyed by id alone folded
+ *      the wrong sprite's value into a script;
+ *  13. a cloud variable keeps its name when stores are renamed: the name is
+ *      the key the cloud server stores the value under, so shortening it
+ *      would reset the project's cloud data.
  *
  * Invariants 1-3 were broken by "remove legacy mutation keys"; 4 by clearing
  * every overwritten value; 5 by "shorten internal IDs" and by near-duplicate
  * merging; 8 and 9 by "remove write-only variables" and "remove dead assets";
- * 10 by numbering block ids per target while Blockly keeps one global registry.
- * All of these reached users and made projects fail to load or behave
+ * 10 by numbering block ids per target while Blockly keeps one global registry;
+ * 11 by leaving a nested SUBSTACK chain out of the near-duplicate signature;
+ * 12 by keying the constant store by variable id only; 13 was never broken in
+ * a release, but renaming a cloud key would silently reset cloud data.  All of
+ * the others reached users and made projects fail to load or behave
  * differently.
  */
 import { createRequire } from "node:module";
@@ -365,9 +378,14 @@ const bothNames = namesOf(bothOut.project.targets[0].variables);
 check(bothNames.length === 2 && bothNames.every((n) => /^[A-Z]$/.test(String(n))),
   `the default no longer emits the shortest variable names (${JSON.stringify(bothNames)})`);
 
-// A cloud variable keeps Scratch's "☁ " marker, but that marker is not a
-// reason to make an ordinary variable skip a letter: "☁ A" and "A" are two
-// different names.
+/*
+ * 13. A cloud variable's name is its key on the cloud server: scratch-vm
+ *     sends `projectId` plus the name, so renaming it strands every value
+ *     already stored for it (a leaderboard reset).  `renameStores` may shorten
+ *     the id but must leave the name -- and every reference to it -- alone.
+ *     Ordinary variables still get the shortest names, so a long cloud name is
+ *     not a reason for them to skip a letter either.
+ */
 const cloudOut = SB3.compressProject({
   targets: [{
     isStage: true, name: "Stage",
@@ -396,12 +414,20 @@ const cloudOut = SB3.compressProject({
   monitors: []
 }, new SB3.Options({}), () => {});
 const cloudVars = cloudOut.project.targets[0].variables;
-const cloudNames = namesOf(cloudVars).sort();
-check(cloudNames.length === 3 &&
-  cloudNames[0] === "A" && cloudNames[1] === "B" && cloudNames[2] === "\u2601 A",
-  `cloud variables did not get the shortest names (${JSON.stringify(cloudNames)})`);
+const cloudEntry = Object.entries(cloudVars).find(([, e]) => e[0] === "\u2601 points");
+const ordinaryNames = namesOf(cloudVars).filter((n) => n !== "\u2601 points").sort();
+check(!!cloudEntry,
+  `the cloud variable name was rewritten (${JSON.stringify(namesOf(cloudVars))})`);
+check(ordinaryNames.length === 2 && ordinaryNames[0] === "A" && ordinaryNames[1] === "B",
+  `ordinary variables did not get the shortest names (${JSON.stringify(ordinaryNames)})`);
 check(Object.keys(cloudVars).sort().join("") === "ABC",
   `cloud variables did not get the shortest store ids (${JSON.stringify(Object.keys(cloudVars))})`);
+check(!!cloudEntry && Object.values(cloudOut.project.targets[0].blocks).some((b) =>
+  b && !Array.isArray(b) && b.opcode === "data_setvariableto" &&
+  Array.isArray((b.fields || {}).VARIABLE) &&
+  b.fields.VARIABLE[0] === "\u2601 points" &&
+  b.fields.VARIABLE[1] === cloudEntry[0]),
+  "a block reference did not follow the shortened cloud id");
 
 /*
  * Extra regressions, both of which reached users as "the project breaks or the
@@ -669,7 +695,7 @@ check(merged.stats.near_duplicates_extracted >= 1,
 //    merge (otherwise the guard would disable the whole feature).
 function buildStopMergeProject() {
   const blocks = {};
-  const addScript = (tag, y, stopOption) => {
+  const addScript = (tag, y, stopOption, sharedBody) => {
     const hat = `stopHat${tag}`;
     const root = `stopIf${tag}`;
     const cond = `stopEq${tag}`;
@@ -688,9 +714,12 @@ function buildStopMergeProject() {
     let prev = null;
     for (let i = 1; i <= 12; i++) {
       const id = `stopSay${tag}${i}`;
+      // `sharedBody` keeps the two stop-free scripts identical apart from the
+      // tag in their condition, which is the shape near-duplicate merging is
+      // meant to fold into one parametrised procedure.
       blocks[id] = blk("looks_say", {
         parent: prev || root,
-        inputs: { MESSAGE: [1, [10, tag + i]] }
+        inputs: { MESSAGE: [1, [10, (sharedBody ? "shared" : tag) + i]] }
       });
       if (prev) blocks[prev].next = id;
       prev = id;
@@ -707,8 +736,8 @@ function buildStopMergeProject() {
   addScript("B", 500, "this script");
   addScript("E", 2000, "other scripts in sprite");
   addScript("F", 2500, "other scripts in sprite");
-  addScript("C", 1000, null);
-  addScript("D", 1500, null);
+  addScript("C", 1000, null, true);
+  addScript("D", 1500, null, true);
   return {
     targets: [{
       isStage: false, name: "Sprite1",
@@ -1736,6 +1765,131 @@ for (let n = 1; shortSequence.size < allIds.length; n += 1) {
 }
 for (const id of allIds) {
   if (!shortSequence.has(id)) check(false, `block id ${JSON.stringify(id)} is outside the shortest global sequence`);
+}
+
+/*
+ * 11. A near-duplicate signature has to cover everything the merge copies.
+ *     A C-block's SUBSTACK chain travels with it, so two `if` blocks whose
+ *     bodies differ after the FIRST statement are not duplicates.  Leaving the
+ *     nested `next` chain out of the signature made both look identical,
+ *     deleted one body and turned the second script into a copy of the first.
+ *     Starship's menu went black that way.
+ */
+function onlyOptions(keys) {
+  const values = {};
+  for (const key of Object.keys(new SB3.Options({}))) values[key] = keys.includes(key);
+  return new SB3.Options(values);
+}
+
+function buildNestedBodyProject() {
+  const blocks = {};
+  const addScript = (tag, y) => {
+    const hat = `nestedHat${tag}`;
+    const root = `nestedIf${tag}`;
+    const cond = `nestedCond${tag}`;
+    blocks[hat] = blk("event_whenflagclicked", { topLevel: true, x: 0, y, next: root });
+    blocks[root] = blk("control_if", {
+      parent: hat,
+      inputs: { CONDITION: [2, cond], SUBSTACK: [2, `nestedSay${tag}1`] }
+    });
+    blocks[cond] = blk("operator_equals", {
+      parent: root,
+      inputs: { OPERAND1: [1, [10, "key"]], OPERAND2: [1, [10, "value"]] }
+    });
+    let prev = null;
+    for (let i = 1; i <= 12; i++) {
+      const id = `nestedSay${tag}${i}`;
+      blocks[id] = blk("looks_say", {
+        parent: prev || root,
+        inputs: { MESSAGE: [1, [10, `${tag}${i}`]] }
+      });
+      if (prev) blocks[prev].next = id;
+      prev = id;
+    }
+  };
+  addScript("a", 0);
+  addScript("b", 500);
+  return {
+    targets: [{
+      isStage: false, name: "Sprite1",
+      variables: {}, lists: {}, broadcasts: {},
+      blocks, comments: {}, currentCostume: 0,
+      costumes: [], sounds: [], volume: 100, layerOrder: 0, visible: true,
+      x: 0, y: 0, size: 100, direction: 90, draggable: false, rotationStyle: "all around"
+    }],
+    monitors: [], extensions: [], meta: { semver: "3.0.0" }
+  };
+}
+
+const nestedBody = SB3.compressProject(buildNestedBodyProject(), onlyOptions([
+  "nearDuplicates", "shortenIds"
+]), () => {});
+{
+  const seen = new Set();
+  for (const b of Object.values(nestedBody.project.targets[0].blocks)) {
+    if (!b || Array.isArray(b) || b.opcode !== "looks_say") continue;
+    const entry = (b.inputs || {}).MESSAGE;
+    if (Array.isArray(entry) && Array.isArray(entry[1]) && entry[1][0] === 10) {
+      seen.add(String(entry[1][1]));
+    }
+  }
+  // Some bodies may be merged behind parameters, so accept a literal that only
+  // survives inside a call; what must never happen is losing a body entirely.
+  const text = JSON.stringify(nestedBody.project.targets[0].blocks);
+  for (const tag of ["a", "b"]) {
+    for (let i = 1; i <= 12; i++) {
+      const msg = `${tag}${i}`;
+      check(text.includes(JSON.stringify(msg)),
+        `near-duplicate merge lost the message ${JSON.stringify(msg)} of a nested body`);
+    }
+  }
+}
+
+/*
+ * 12. `propagateConstants` must resolve variable references the way scratch-vm
+ *     does: in the running target's scope, falling back to the stage.  Two
+ *     sprites may reuse one variable id for unrelated local variables, and a
+ *     store keyed by id alone let the later sprite's value overwrite the
+ *     earlier one.  Starship names PIXELS_PER_M in both MENU (1.5) and GAME
+ *     (0); folding MENU's reads to 0 froze the world at zero scale.
+ */
+function buildDuplicateLocalVarProject() {
+  const DUP = "duplicateLocalVarId";
+  const make = (tag, value, y) => {
+    const blocks = {
+      [`sayHat${tag}`]: blk("event_whenflagclicked", { topLevel: true, x: 0, y, next: `say${tag}` })
+    };
+    blocks[`say${tag}`] = blk("looks_say", {
+      parent: `sayHat${tag}`,
+      inputs: { MESSAGE: [3, [12, "scale", DUP], [10, ""]] }
+    });
+    return {
+      isStage: false, name: `Sprite${tag}`,
+      variables: { [DUP]: ["scale", value] }, lists: {}, broadcasts: {},
+      blocks, comments: {}, currentCostume: 0,
+      costumes: [], sounds: [], volume: 100, layerOrder: 0, visible: true,
+      x: 0, y: 0, size: 100, direction: 90, draggable: false, rotationStyle: "all around"
+    };
+  };
+  return {
+    targets: [make("1", 1.5, 0), make("2", 0, 0)],
+    monitors: [], extensions: [], meta: { semver: "3.0.0" }
+  };
+}
+
+const dupLocals = SB3.compressProject(buildDuplicateLocalVarProject(),
+  onlyOptions(["propagateConstants", "shortenIds"]), () => {});
+{
+  for (const tgt of dupLocals.project.targets) {
+    const say = Object.values(tgt.blocks).find(
+      (b) => b && !Array.isArray(b) && b.opcode === "looks_say");
+    const entry = say && (say.inputs || {}).MESSAGE;
+    const isLiteral = Array.isArray(entry) && entry[0] === 1;
+    const value = isLiteral && Array.isArray(entry[1]) ? String(entry[1][1]) : null;
+    const want = tgt.name === "Sprite1" ? "1.5" : "0";
+    check(isLiteral && value === want,
+      `${tgt.name}'s local variable was folded to ${JSON.stringify(value)} instead of ${JSON.stringify(want)}`);
+  }
 }
 
 if (failures) {

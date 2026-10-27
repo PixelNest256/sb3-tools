@@ -685,25 +685,17 @@
     }
 
     // ------------------------------------------------------------------
-    // Shortest-free-string allocators.  The "笘・" marker on cloud variables is
-    // required by Scratch, so it is added around the short name rather than
-    // being counted as part of it.  Cloud and ordinary names therefore have
-    // their own counters: a cloud variable may take "笘・A" while an ordinary
-    // one also takes "A", because the marker alone keeps the two names
-    // distinct.
+    // Shortest-free-string allocators.  Cloud variables are not renamed at all
+    // (see `_planStoreMappings`: their name is the cloud-server key), so this
+    // only ever hands out ordinary names.
     _storeNameGenerators(reservedVarNames, reservedListNames) {
-      let varNameSeq = 0, cloudNameSeq = 0, listNameSeq = 0;
+      let varNameSeq = 0, listNameSeq = 0;
       return {
-        nextVarName: (cloud) => {
+        nextVarName: () => {
           let name;
           do {
-            if (cloud) {
-              cloudNameSeq += 1;
-              name = CLOUD_PREFIX + " " + encodeId(cloudNameSeq);
-            } else {
-              varNameSeq += 1;
-              name = encodeId(varNameSeq);
-            }
+            varNameSeq += 1;
+            name = encodeId(varNameSeq);
           } while (reservedVarNames.has(name));
           return name;
         },
@@ -800,8 +792,13 @@
         const finalLists = new Set(reservedLists);
         for (const e of info.vars) {
           let name;
-          if (e.kept || !renameStores) name = e.name;
-          else name = gen.nextVarName(isStr(e.name) && e.name.startsWith(CLOUD_PREFIX));
+          // A cloud variable's name *is* its key on the cloud server
+          // (scratch-vm sends `projectId` + name), so renaming one silently
+          // strands every value already stored for it -- a leaderboard reset.
+          // The id is still shortened; only the visible name has to stay.
+          const cloud = isStr(e.name) && e.name.startsWith(CLOUD_PREFIX);
+          if (e.kept || cloud || !renameStores) name = e.name;
+          else name = gen.nextVarName();
           varNames.set(e.id, name);
           if (isStr(name)) finalVars.add(name);
         }
@@ -2372,9 +2369,18 @@
 
     _propagateConstants(targets, monitors) {
       const st = this.stats;
-      const store = new Map();
-      for (const tgt of targets) {
-        if (!isDict(tgt) || !isDict(tgt.variables)) continue;
+
+      // scratch-vm resolves a variable reference against the target running
+      // the script and then the stage (engine/target.js:lookupVariableById).
+      // A sprite-local id is never visible from another sprite, and two
+      // sprites may reuse one id for unrelated local variables -- Starship
+      // does exactly that with PIXELS_PER_M (MENU 1.5, GAME 0).  A store keyed
+      // by id alone let GAME's 0 overwrite MENU's 1.5 and rewrote MENU's reads
+      // to 0, which broke the whole game.  Keep one table per target and
+      // resolve every reference in the scope that will actually run it.
+      const tables = targets.map((tgt) => {
+        const table = new Map();
+        if (!isDict(tgt) || !isDict(tgt.variables)) return table;
         for (const [vid, ent] of Object.entries(tgt.variables)) {
           let name, value;
           if (isArr(ent) && ent.length) {
@@ -2383,126 +2389,158 @@
           } else {
             name = String(ent); value = "";
           }
-          store.set(vid, { tgt, name, value });
+          table.set(vid, { name, value });
+        }
+        return table;
+      });
+      let stageTi = -1;
+      for (let ti = 0; ti < targets.length; ti++) {
+        const tgt = targets[ti];
+        if (isDict(tgt) && tgt.isStage === true) { stageTi = ti; break; }
+      }
+      const stageTable = stageTi >= 0 ? tables[stageTi] : new Map();
+      const keyOf = (ti, vid) => ti + "\u0000" + vid;
+      const store = new Map();
+      const keysById = new Map();
+      for (let ti = 0; ti < targets.length; ti++) {
+        const tgt = targets[ti];
+        if (!isDict(tgt)) continue;
+        for (const [vid, ent] of tables[ti]) {
+          const key = keyOf(ti, vid);
+          store.set(key, { ti, id: vid, tgt, name: ent.name, value: ent.value });
+          if (!keysById.has(vid)) keysById.set(vid, []);
+          keysById.get(vid).push(key);
         }
       }
       if (!store.size) return;
-      const storeKeys = new Set(store.keys());
 
-      let bad = union(this.varCloudIds, this.displayVarIds, this.sensedVarIds,
-        this.unknownReadVarIds);
-      for (const mon of (isArr(monitors) ? monitors : [])) {
-        if (!isDict(mon) || mon.opcode !== "data_variable") continue;
-        const mid = mon.id;
-        if (isStr(mid) && store.has(mid)) bad.add(mid);
-        const pname = (mon.params || {}).VARIABLE;
-        if (isStr(pname)) addAll(bad, this.varNameIds.get(pname) || new Set());
-      }
-
-      const refVid = (arr) => {
-        if (!isArr(arr) || !arr.length || arr[0] !== 12) return null;
-        const pid = arr.length > 2 ? arr[2] : null;
-        if (isStr(pid) && store.has(pid)) return pid;
-        const name = arr.length > 1 ? arr[1] : null;
-        if (isStr(name)) {
-          const ids = this.varNameIds.get(name);
-          if (ids && ids.size === 1) {
-            const vid = ids.values().next().value;
-            if (store.has(vid)) return vid;
-          }
+      // The VM falls back to a name lookup inside the same scope when the id
+      // is not one it knows, so mirror that instead of a global name map.
+      const nameIn = (table, name) => {
+        let found = null;
+        for (const [vid, ent] of table) {
+          if (ent.name !== name) continue;
+          if (found !== null) return null; // ambiguous: leave it alone
+          found = vid;
+        }
+        return found;
+      };
+      const resolve = (ti, id, name) => {
+        if (!(ti >= 0 && ti < tables.length)) return null;
+        const own = tables[ti];
+        if (isStr(id) && own.has(id)) return keyOf(ti, id);
+        if (stageTi >= 0 && ti !== stageTi && isStr(id) && stageTable.has(id)) {
+          return keyOf(stageTi, id);
+        }
+        if (!isStr(name)) return null;
+        const local = nameIn(own, name);
+        if (isStr(local)) return keyOf(ti, local);
+        if (stageTi >= 0 && ti !== stageTi) {
+          const global = nameIn(stageTable, name);
+          if (isStr(global)) return keyOf(stageTi, global);
         }
         return null;
       };
-      const blockVid = (blk) => {
+
+      const bad = new Set();
+      const badIds = union(this.varCloudIds, this.displayVarIds,
+        this.sensedVarIds, this.unknownReadVarIds);
+      if (badIds.size) {
+        for (const [key, info] of store) if (badIds.has(info.id)) bad.add(key);
+      }
+      for (const mon of (isArr(monitors) ? monitors : [])) {
+        if (!isDict(mon) || mon.opcode !== "data_variable") continue;
+        const mid = mon.id;
+        const pname = (mon.params || {}).VARIABLE;
+        for (const [key, info] of store) {
+          if (isStr(mid) && info.id === mid) bad.add(key);
+          if (isStr(pname) && info.name === pname) bad.add(key);
+        }
+      }
+
+      const refVid = (arr, ti) => {
+        if (!isArr(arr) || !arr.length || arr[0] !== 12) return null;
+        return resolve(ti, arr.length > 2 ? arr[2] : null,
+          arr.length > 1 ? arr[1] : null);
+      };
+      const blockVid = (blk, ti) => {
         const fv = (blk.fields || {}).VARIABLE;
         if (!isArr(fv) || !fv.length) return null;
-        const fid = fv.length > 1 ? fv[1] : null;
-        if (isStr(fid) && store.has(fid)) return fid;
-        const name = fv[0];
-        if (isStr(name)) {
-          const ids = this.varNameIds.get(name);
-          if (ids && ids.size === 1) {
-            const vid = ids.values().next().value;
-            if (store.has(vid)) return vid;
-          }
-        }
-        return null;
+        return resolve(ti, fv.length > 1 ? fv[1] : null, fv[0]);
       };
 
       const blocksByTgt = targets.map((tgt) =>
         (isDict(tgt) && isDict(tgt.blocks) ? tgt.blocks : {}));
 
       const writes = new Map();
-      for (const blocks of blocksByTgt) {
-        for (const blk of Object.values(blocks)) {
+      for (let ti = 0; ti < blocksByTgt.length; ti++) {
+        for (const blk of Object.values(blocksByTgt[ti])) {
           if (!isDict(blk)) continue;
           const fv = (blk.fields || {}).VARIABLE;
           if (!isArr(fv) || !fv.length) continue;
+          const key = resolve(ti, fv.length > 1 ? fv[1] : null, fv[0]);
+          if (key === null) continue;
           const op = blk.opcode;
-          const fid = fv.length > 1 ? fv[1] : null;
-          let ids;
-          if (isStr(fid) && store.has(fid)) ids = new Set([fid]);
-          else ids = intersect(this.varNameIds.get(fv[0]) || new Set(), storeKeys);
-          if (!ids.size) continue;
           if (op === "data_setvariableto") {
             const pair = Compressor._setLiteral(blk);
-            if (pair === null) addAll(bad, ids);
-            else for (const vid of ids) {
-              if (!writes.has(vid)) writes.set(vid, []);
-              writes.get(vid).push(pair);
+            if (pair === null) bad.add(key);
+            else {
+              if (!writes.has(key)) writes.set(key, []);
+              writes.get(key).push(pair);
             }
           } else if (VAR_WRITE_OPS.has(op)) {
-            addAll(bad, ids);
+            bad.add(key);
           } else if (op === "data_variable" || op === "data_showvariable" ||
               op === "data_hidevariable") {
             /* read or display only */
           } else {
-            addAll(bad, ids);
+            bad.add(key);
           }
         }
       }
 
       const always = new Map();
       const dominated = new Map();
-      for (const [vid, info] of store) {
-        if (bad.has(vid)) continue;
+      for (const [key, info] of store) {
+        if (bad.has(key)) continue;
         const init = Compressor._valueLiteral(info.value);
-        const ws = writes.get(vid);
+        const ws = writes.get(key);
         if (ws === undefined) {
-          if (init !== null) always.set(vid, init);
+          if (init !== null) always.set(key, init);
           continue;
         }
         if (!ws.length) continue;
         const first = ws[0];
         if (ws.some((w) => !pairEq(w, first))) continue;
-        if (init !== null && pairEq(init, first)) always.set(vid, first);
-        else dominated.set(vid, first);
+        if (init !== null && pairEq(init, first)) always.set(key, first);
+        else dominated.set(key, first);
       }
       if (!always.size && !dominated.size) return;
 
       const refCount = new Map();
-      const countRefs = (node) => {
+      const countRefs = (node, ti) => {
         if (isArr(node)) {
           if (node.length && node[0] === 12) {
-            const vid = refVid(node);
-            if (vid !== null) refCount.set(vid, (refCount.get(vid) || 0) + 1);
+            const key = refVid(node, ti);
+            if (key !== null) refCount.set(key, (refCount.get(key) || 0) + 1);
             return;
           }
-          for (const item of node) countRefs(item);
+          for (const item of node) countRefs(item, ti);
         } else if (isDict(node)) {
-          for (const value of Object.values(node)) countRefs(value);
+          for (const value of Object.values(node)) countRefs(value, ti);
         }
       };
       const inputRefs = new Map();
-      for (const blocks of blocksByTgt) {
+      for (let ti = 0; ti < blocksByTgt.length; ti++) {
+        const blocks = blocksByTgt[ti];
         for (const [bid, blk] of Object.entries(blocks)) {
-          if (isArr(blk)) { countRefs(blk); continue; }
+          if (isArr(blk)) { countRefs(blk, ti); continue; }
           if (!isDict(blk)) continue;
           if (blk.opcode === "data_variable") {
-            const vid = blockVid(blk);
-            if (vid !== null) refCount.set(vid, (refCount.get(vid) || 0) + 1);
+            const key = blockVid(blk, ti);
+            if (key !== null) refCount.set(key, (refCount.get(key) || 0) + 1);
           }
-          countRefs(blk.inputs);
+          countRefs(blk.inputs, ti);
           for (const entry of Object.values(blk.inputs || {})) {
             if (!isArr(entry)) continue;
             for (let i = 1; i < entry.length; i++) {
@@ -2547,13 +2585,13 @@
             if (key.startsWith("SUBSTACK")) continue;
             const child = entry[1];
             if (isArr(child)) {
-              const vid = refVid(child);
+              const vid = refVid(child, ti);
               if (vid !== null && known.has(vid)) recordPrim(inputs, key, entry, vid, known.get(vid));
             } else if (isStr(child) && has(blocks, child)) {
               const cb = blocks[child];
               if (!isDict(cb) || done.has(child)) continue;
               if (cb.opcode === "data_variable") {
-                const vid = blockVid(cb);
+                const vid = blockVid(cb, ti);
                 if (vid !== null && known.has(vid)) {
                   recordBlock(blocks, inputs, key, entry, vid, child, cb, known.get(vid));
                 }
@@ -2575,7 +2613,7 @@
             done.add(cur);
             scanInputs(blk, known, cur);
             if (blk.opcode === "data_setvariableto") {
-              const vid = blockVid(blk);
+              const vid = blockVid(blk, ti);
               if (vid !== null && dominated.has(vid) &&
                   pairEq(Compressor._setLiteral(blk), dominated.get(vid))) {
                 known = new Map(known);
@@ -2601,18 +2639,18 @@
         }
       }
 
-      for (const vid of [...edits.keys()]) {
-        const items = edits.get(vid);
-        const pair = always.get(vid);
+      for (const [key, items] of edits) {
+        const pair = always.get(key);
         let total = items.reduce((sum, e) => sum + e.delta, 0);
         let dropStore = false;
+        let info = null;
         let variables = null;
-        if (pair !== undefined && writes.get(vid) === undefined &&
-            (refCount.get(vid) || 0) - items.length === 0) {
-          const info = store.get(vid);
+        if (pair !== undefined && writes.get(key) === undefined &&
+            (refCount.get(key) || 0) - items.length === 0) {
+          info = store.get(key);
           variables = info.tgt.variables;
-          if (isDict(variables) && has(variables, vid)) {
-            total -= jlen(vid) + jlen(variables[vid]) + 2;
+          if (isDict(variables) && has(variables, info.id)) {
+            total -= jlen(info.id) + jlen(variables[info.id]) + 2;
             dropStore = true;
           }
         }
@@ -2624,10 +2662,14 @@
         st.const_vars_inlined += 1;
         st.const_reads_inlined += items.length;
         if (dropStore) {
-          delete variables[vid];
-          this.usedVarIds.delete(vid);
-          this.readVarIds.delete(vid);
-          this.droppedVarIds.add(vid);
+          delete variables[info.id];
+          // The id bookkeeping below is global, so only touch it when no other
+          // target reuses this id for a variable of its own.
+          if ((keysById.get(info.id) || []).length === 1) {
+            this.usedVarIds.delete(info.id);
+            this.readVarIds.delete(info.id);
+            this.droppedVarIds.add(info.id);
+          }
         }
       }
     }
@@ -4033,19 +4075,27 @@
 
     _nearCanon(blocks, bid, cache) {
       if (!cache) cache = new Map();
-      const canon = (current, stack) => {
-        if (cache.has(current)) return cache.get(current);
+      // A near-duplicate group copies its start block together with every
+      // nested input, and a nested SUBSTACK brings the rest of that substack's
+      // `next` chain along as well.  The signature and the hole list therefore
+      // have to follow `next` inside the merged subtree -- otherwise two
+      // C-blocks whose bodies differ after the first block look identical and
+      // the merge deletes one of the bodies.  The root block's own `next` is
+      // deliberately excluded: it stays in the surrounding script.
+      const canon = (current, stack, followNext) => {
+        const ck = followNext ? current + "\u0000n" : current + "\u0000r";
+        if (cache.has(ck)) return cache.get(ck);
         if (stack.has(current)) return { sig: "cycle", holes: [] };
         const blk = blocks[current];
         let value;
         if (isArr(blk)) {
           value = { sig: "prim:" + this._hashCanon(this._freeze(blk)), holes: [] };
-          cache.set(current, value);
+          cache.set(ck, value);
           return value;
         }
         if (!isDict(blk)) {
           value = { sig: "missing", holes: [] };
-          cache.set(current, value);
+          cache.set(ck, value);
           return value;
         }
         const nstack = new Set(stack);
@@ -4069,7 +4119,7 @@
           const parts = [];
           for (const item of entry) {
             if (isStr(item) && has(blocks, item)) {
-              const child = canon(item, nstack);
+              const child = canon(item, nstack, true);
               parts.push(["ref", child.sig]);
               for (const h of child.holes) holes.push(h);
             } else if (isArr(item)) {
@@ -4080,15 +4130,21 @@
           }
           inputs.push([key, parts]);
         }
+        let tail = null;
+        if (followNext && isStr(blk.next) && has(blocks, blk.next)) {
+          const rest = canon(blk.next, nstack, true);
+          tail = rest.sig;
+          for (const h of rest.holes) holes.push(h);
+        }
         value = {
           sig: this._hashCanon(["NB", blk.opcode === undefined ? null : blk.opcode,
-            fields, inputs, this._freeze(blk.mutation || {}), !!blk.shadow]),
+            fields, inputs, this._freeze(blk.mutation || {}), !!blk.shadow, tail]),
           holes
         };
-        cache.set(current, value);
+        cache.set(ck, value);
         return value;
       };
-      return canon(bid, new Set());
+      return canon(bid, new Set(), false);
     }
 
     _findNearDuplicateGroup(blocks, banned) {
@@ -5639,23 +5695,24 @@
     _normalizeTypes(project) {
       const st = this.stats;
 
-      // Remove md5ext from costumes and sounds
+      // Remove a redundant `md5ext` from costumes.  Both scratch-vm and
+      // TurboWarp rebuild the asset name from `assetId` + "." + `dataFormat`
+      // when the key is missing, so dropping it is safe -- but only when it
+      // really is that exact name, otherwise the file would be looked up
+      // under a different id.
+      //
+      // Sounds must keep `md5ext`: `sb3.js` reads `sound.md5 = soundSource.md5ext`
+      // with no fallback at all, and `loadSound` then calls
+      // `splitFirst(sound.md5, ".")` which throws on `undefined`.
       for (const tgt of project.targets) {
         if (!isDict(tgt)) continue;
 
         if (isArr(tgt.costumes)) {
           for (const c of tgt.costumes) {
-            if (isDict(c) && has(c, "md5ext")) {
+            if (!isDict(c) || !has(c, "md5ext")) continue;
+            if (isStr(c.assetId) && isStr(c.dataFormat) &&
+                c.md5ext === c.assetId + "." + c.dataFormat) {
               delete c.md5ext;
-              st.md5ext_removed += 1;
-            }
-          }
-        }
-
-        if (isArr(tgt.sounds)) {
-          for (const s of tgt.sounds) {
-            if (isDict(s) && has(s, "md5ext")) {
-              delete s.md5ext;
               st.md5ext_removed += 1;
             }
           }
