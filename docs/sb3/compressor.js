@@ -396,7 +396,7 @@
       }
       const o = this.options;
       this.progress("collect", 0.0, "Collecting variables, lists, and broadcasts...");
-      if (!o.removeMonitors) this._collectMonitorStores(targets, project.monitors);
+      this._collectMonitorStores(targets, project.monitors, o.removeMonitors && !o.renameStores);
       if (o.dropObscuredShadows) this._dropObscuredShadows(targets);
       if (o.removeUnreachable) {
         this.progress("collect", 1.0, "Removing unreachable blocks and comments...");
@@ -411,10 +411,8 @@
         this.droppedVarIds = new Set();
         this.droppedListIds = new Set();
       } else {
-        if (!o.removeMonitors) {
-          for (const id of this.keptMonVarIds) this.usedVarIds.add(id);
-          for (const id of this.keptMonListIds) this.usedListIds.add(id);
-        }
+        for (const id of this.keptMonVarIds) this.usedVarIds.add(id);
+        for (const id of this.keptMonListIds) this.usedListIds.add(id);
         this.droppedVarIds = new Set([...this.varMap.keys()].filter((k) => !this.usedVarIds.has(k)));
         this.droppedListIds = new Set([...this.listMap.keys()].filter((k) => !this.usedListIds.has(k)));
       }
@@ -623,7 +621,14 @@
     // entries alone so a displayed variable keeps its label and a hidden
     // monitor keeps its saved position.  `removeMonitors` opts out: hidden
     // monitors are dropped and their stores can be shortened or removed.
-    _collectMonitorStores(targets, monitors) {
+    //
+    // That opt-out is only safe when names are also being rewritten
+    // (`renameStores`).  When names are kept, a hidden monitor's store may
+    // still be read by name from a script that was compiled against the
+    // original ids, so dropping it silently breaks the project.  In that
+    // case only *visible* monitors may be collected; their stores have to
+    // survive or the monitor would point at a missing variable.
+    _collectMonitorStores(targets, monitors, visibleOnly = false) {
       const varIds = new Set(), listIds = new Set();
       this.keptMonVarIds = varIds;
       this.keptMonListIds = listIds;
@@ -660,6 +665,7 @@
       const idsV = allIds("v"), idsL = allIds("l");
       for (const mon of monitors) {
         if (!isDict(mon)) continue;
+        if (visibleOnly && mon.visible === false) continue;
         const isVar = mon.opcode === "data_variable";
         if (!isVar && mon.opcode !== "data_listcontents") continue;
         const kind = isVar ? "v" : "l";
