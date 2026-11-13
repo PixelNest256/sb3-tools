@@ -1,0 +1,251 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SB3 Repair — validate and recover a damaged Scratch project</title>
+<meta name="description" content="Validate a Scratch or TurboWarp .sb3 against the project schema, recover a damaged ZIP or project.json, repair broken block links, missing variables, assets and monitors, and download a loadable file. Nothing is uploaded.">
+<meta name="theme-color" content="#e7e8e1">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' fill='%23171a16'/%3E%3Cpath d='M8 9h16v4H8zm0 6h16v4H8zm0 6h10v4H8z' fill='%23e7e8e1'/%3E%3Crect x='22' y='20' width='4' height='8' fill='%23e14b12'/%3E%3C/svg%3E">
+<script>
+(function () {
+  var saved = null;
+  try { saved = localStorage.getItem("sb3-repair-theme-v1"); } catch (e) {}
+  var dark = saved ? saved === "dark"
+    : !!(window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches);
+  document.documentElement.setAttribute("data-theme", dark ? "dark" : "light");
+  var meta = document.querySelector('meta[name="theme-color"]');
+  if (meta) meta.setAttribute("content", dark ? "#15180f" : "#e7e8e1");
+})();
+</script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=Barlow:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<a class="skip-link" href="#main">Skip to the repair tool</a>
+
+<div class="sheet">
+  <header class="masthead">
+    <div class="brand">
+      <a class="brand-home" href="../" aria-label="SB3 Repair — home">
+        <span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i></span>
+        <span class="brand-name">SB3 Repair</span>
+      </a>
+      <span class="brand-sub">project recovery</span>
+    </div>
+    <div class="masthead-links">
+      <details class="tool-menu">
+        <summary aria-label="Tools">
+          <span class="menu-bars" aria-hidden="true"><i></i><i></i><i></i></span>
+        </summary>
+        <nav class="tool-menu-panel" aria-label="Tools">
+          <a href="../">Home</a>
+          <a href="../sb3/">project.json Compressor</a>
+          <a href="../media/">SB3 Media Compressor</a>
+          <a href="../full/">SB3 Full Compressor</a>
+          <a href="../analyzer/">SB3 Analyzer</a>
+          <a href="../repair/" aria-current="page">SB3 Repair</a>
+        </nav>
+      </details>
+      <a class="lang-link" href="ja/" hreflang="ja" lang="ja">日本語</a>
+      <div class="theme-switch" role="group" aria-label="Color theme">
+        <button type="button" data-theme-set="light">Light</button>
+        <button type="button" data-theme-set="dark">Dark</button>
+      </div>
+    </div>
+  </header>
+
+  <main id="main" class="analyzer-layout repair-main">
+    <div class="analyzer-main">
+      <section class="intro" aria-labelledby="page-title">
+        <p class="eyebrow">For damaged Scratch and TurboWarp project files</p>
+        <h1 id="page-title">Find what broke.<br>Put it back.</h1>
+        <p class="lead">
+          Reads an <code>.sb3</code>, validates it against the Scratch / TurboWarp
+          project structure, recovers a damaged ZIP or <code>project.json</code>,
+          repairs dangling block links, missing stores, assets, custom-block
+          mutations and monitors, then writes a loadable <code>.sb3</code>.
+          Nothing is uploaded.
+        </p>
+        <p class="html-note">
+          <strong>Strict by design.</strong>
+          The checker reports errors separately from warnings. A repaired file is
+          re-validated before it is offered for download. Missing media is replaced
+          with a transparent costume or a silent sound; data cut off the end of a
+          truncated <code>project.json</code> cannot be recreated.
+        </p>
+      </section>
+
+      <section class="panel input-panel" aria-labelledby="input-title">
+        <div class="panel-head">
+          <h2 id="input-title">Input</h2>
+          <span class="panel-meta">.sb3 / project.json</span>
+        </div>
+        <div id="dropzone" class="dropzone" role="button" tabindex="0"
+             aria-describedby="drop-hint" aria-label="Choose an .sb3 or project.json file">
+          <span class="corner tl" aria-hidden="true"></span>
+          <span class="corner tr" aria-hidden="true"></span>
+          <span class="corner bl" aria-hidden="true"></span>
+          <span class="corner br" aria-hidden="true"></span>
+          <span class="drop-glyph" aria-hidden="true">.sb3</span>
+          <p class="drop-title">Drop a damaged project here</p>
+          <p class="drop-hint" id="drop-hint">or <span class="linkish">choose a file</span> from your computer</p>
+        </div>
+        <input type="file" id="fileInput" class="visually-hidden" accept=".sb3,.json,application/zip,application/json">
+        <div id="fileRow" class="file-row" hidden>
+          <div class="file-meta">
+            <span class="file-name" id="fileName">project.sb3</span>
+            <span class="file-size" id="fileSize">—</span>
+          </div>
+          <button type="button" id="clearBtn" class="text-btn">Remove</button>
+        </div>
+        <p class="hint">
+          A raw <code>project.json</code> is accepted too. Its media cannot be
+          recovered, so placeholders are used where a costume or sound is missing.
+        </p>
+      </section>
+
+      <section class="options-panel" aria-labelledby="options-title">
+        <div class="panel-head">
+          <h2 id="options-title">Repair options</h2>
+          <span class="panel-meta">applied on repair</span>
+        </div>
+        <div class="opt-list">
+          <div class="opt">
+            <input type="checkbox" id="optFill" checked>
+            <label for="optFill">Create placeholders for missing costumes and sounds</label>
+            <p class="opt-note">A transparent PNG and a silent WAV keep every asset reference valid.</p>
+          </div>
+          <div class="opt">
+            <input type="checkbox" id="optReplace" checked>
+            <label for="optReplace">Replace unreadable media with placeholders</label>
+            <p class="opt-note">Applies when the file exists but is not a valid PNG, SVG, JPEG, GIF, BMP, WAV or MP3.</p>
+          </div>
+          <div class="opt">
+            <input type="checkbox" id="optMonitors" checked>
+            <label for="optMonitors">Remove stale monitors</label>
+            <p class="opt-note">Drops monitors that point at a deleted sprite, variable or list.</p>
+          </div>
+          <div class="opt">
+            <input type="checkbox" id="optCalls" checked>
+            <label for="optCalls">Add empty definitions for unresolved custom-block calls</label>
+            <p class="opt-note">Keeps the call site valid when its definition was lost. The call still does nothing.</p>
+          </div>
+        </div>
+        <div class="run-row">
+          <button type="button" id="inspectBtn" class="btn-line" disabled>Check only</button>
+          <button type="button" id="repairBtn" class="btn-line is-primary" disabled>Repair project</button>
+        </div>
+        <p class="hint" id="runHint">Choose a project to check it.</p>
+      </section>
+
+      <div id="report" hidden>
+        <section class="report" aria-labelledby="summary-title">
+          <div class="panel-head">
+            <h2 id="summary-title">Summary</h2>
+            <span class="head-rule" aria-hidden="true"></span>
+            <span class="panel-meta">strict validation</span>
+          </div>
+          <div class="summary-grid" id="summaryGrid"></div>
+        </section>
+
+        <section class="report" aria-labelledby="actions-title" id="actionsSection" hidden>
+          <div class="panel-head">
+            <h2 id="actions-title">Repairs applied</h2>
+            <span class="head-rule" aria-hidden="true"></span>
+            <span class="panel-meta" id="actionsMeta">—</span>
+          </div>
+          <div class="issue-list" id="actionList"></div>
+        </section>
+
+        <section class="report" aria-labelledby="before-title" id="beforeSection">
+          <div class="panel-head">
+            <h2 id="before-title">Validation before repair</h2>
+            <span class="head-rule" aria-hidden="true"></span>
+            <span class="panel-meta" id="beforeMeta">—</span>
+          </div>
+          <div class="issue-list" id="beforeList"></div>
+        </section>
+
+        <section class="report" aria-labelledby="after-title" id="afterSection" hidden>
+          <div class="panel-head">
+            <h2 id="after-title">Validation after repair</h2>
+            <span class="head-rule" aria-hidden="true"></span>
+            <span class="panel-meta" id="afterMeta">—</span>
+          </div>
+          <div class="issue-list" id="afterList"></div>
+        </section>
+      </div>
+    </div>
+
+    <aside class="analyzer-side" aria-label="Repair summary">
+      <section class="readout" aria-labelledby="readout-title">
+        <div class="readout-head">
+          <h2 id="readout-title">Repair</h2>
+          <span class="stamp" aria-hidden="true">Local<br>only</span>
+        </div>
+
+        <div class="size-pair">
+          <div class="size-row"><span class="label">input</span><span class="value" id="fileValue">—</span></div>
+          <div class="size-row"><span class="label">project.json</span><span class="value" id="jsonValue">—</span></div>
+          <div class="size-row"><span class="label">targets</span><span class="value" id="targetValue">—</span></div>
+          <div class="size-row"><span class="label">blocks</span><span class="value" id="blockValue">—</span></div>
+          <div class="size-row"><span class="label">assets</span><span class="value" id="assetValue">—</span></div>
+        </div>
+
+        <div class="stat-pair">
+          <div class="stat-line"><span class="label">errors before</span><span class="value" id="errorsBefore">—</span></div>
+          <div class="stat-line"><span class="label">warnings before</span><span class="value" id="warningsBefore">—</span></div>
+          <div class="stat-line"><span class="label">errors after</span><span class="value" id="errorsAfter">—</span></div>
+          <div class="stat-line"><span class="label">warnings after</span><span class="value" id="warningsAfter">—</span></div>
+          <div class="stat-line"><span class="label">repairs</span><span class="value" id="fixedValue">—</span></div>
+        </div>
+
+        <div class="status-row">
+          <span class="label">status</span>
+          <span class="status-value" id="statusValue">—</span>
+          <span class="tag" id="statusTag" hidden></span>
+        </div>
+
+        <p class="limit-note" id="statusNote">Validate first, then repair.</p>
+        <p class="run-message" id="phaseLabel" aria-live="polite">Ready</p>
+
+        <div class="readout-actions">
+          <button type="button" id="repairBtnSide" class="btn-primary" disabled>Repair project</button>
+          <button type="button" id="inspectBtnSide" class="btn-quiet" disabled>Check only</button>
+        </div>
+
+        <div class="dl-row" id="downloadRow" hidden>
+          <a class="btn-quiet" id="downloadSb3" href="#" download>Download .sb3</a>
+          <a class="btn-quiet" id="downloadJson" href="#" download>Download project.json</a>
+          <a class="btn-quiet" id="downloadReport" href="#" download>Download report</a>
+        </div>
+
+        <div class="readout-foot">
+          <span>Engine: SB3 Repair</span>
+          <span id="engineVersion">v1.0</span>
+        </div>
+      </section>
+    </aside>
+  </main>
+
+  <footer class="footer">
+    <p><strong>SB3 Repair</strong> · everything runs in your browser; files are never uploaded.</p>
+    <p class="footer-links">
+      <a class="footer-feedback" href="https://scratch.mit.edu/projects/1395313805/" rel="noopener" title="Comments and feedback on Scratch">Feedback ↗</a>
+      <span aria-hidden="true">/</span>
+      <a href="https://github.com/PixelNest256/sb3-tools" rel="noopener">GitHub repository ↗</a>
+      <span aria-hidden="true">/</span>
+      <span>MIT License</span>
+    </p>
+  </footer>
+</div>
+
+<script src="jszip.min.js"></script>
+<script src="repair.js"></script>
+<script src="../menu.js"></script>
+<script src="app.js"></script>
+</body>
+</html>

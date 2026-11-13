@@ -3,8 +3,9 @@
 **English** · [日本語](README.ja.md)
 
 Browser-only utilities for **Scratch / TurboWarp `.sb3`** projects: three
-compressors and one analyzer. Everything runs inside the tab — there is no
-upload, no install, and no build step for the site itself.
+compressors, one analyzer, and one validator/repair tool. Everything runs
+inside the tab — there is no upload, no install, and no build step for the site
+itself.
 
 **Live site:** <https://pixelnest256.github.io/sb3-tools/>
 · Japanese: <https://pixelnest256.github.io/sb3-tools/ja/>
@@ -17,9 +18,10 @@ upload, no install, and no build step for the site itself.
 | `/media/` | **SB3 Media Compressor** | Re-encodes the costumes and sounds (PNG, JPEG, SVG, WAV, MP3). `project.json` only changes where a WAV→MP3 or SVG→PNG conversion rewrites that asset's entry. |
 | `/full/` | **SB3 Full Compressor** | Runs both passes on one file and repacks once. |
 | `/analyzer/` | **SB3 Analyzer** | Reports where the bytes and blocks go, with warnings against Scratch's upload limits. Writes nothing. |
+| `/repair/` | **SB3 Repair** | Strictly validates a project, salvages a broken ZIP or `project.json`, repairs block links, stores, assets and monitors, then writes a loadable `.sb3`. |
 
 Each tool has an English page and a Japanese page (`…/ja/`). Use `docs/sb3/`,
-`docs/media/`, `docs/full/`, and `docs/analyzer/` when editing.
+`docs/media/`, `docs/full/`, `docs/analyzer/`, and `docs/repair/` when editing.
 
 ## What the compressors do
 
@@ -91,6 +93,36 @@ Media compression is spread across a pool of nested Web Workers (one per CPU
 core, up to 12), so projects with many costumes finish several times faster; it
 falls back to a single worker when nested workers are unavailable.
 
+### Repair
+
+`docs/repair/repair.js` is a standalone engine shared by the page and the Node
+checks. It reads the ZIP directly rather than relying only on the central
+directory, so it can recover an archive whose EOCD or central directory is
+missing. `project.json` goes through a staged JSON recovery (BOM, NUL bytes,
+Scratch 2.0 backspace escapes, raw control characters, leading zeroes,
+missing/trailing commas, a missing closing quote, a mismatched object bracket,
+Python `True`/`False`/`None` literals, a singular `target` key, truncation and
+the case-insensitive `Project.json` entry name) before the structural pass.
+
+The structural pass validates and repairs:
+
+- stage presence/order, target fields, layer order and per-target containers;
+- dangling `next`, `parent` and input references, input cycles, missing
+  `topLevel`/`shadow` flags and invalid top-level primitives;
+- undeclared variables, lists and broadcasts (creating them in the correct
+  scope), unsafe store IDs, and monitor references;
+- custom-block definitions/prototypes/mutations and orphan calls;
+- asset metadata, missing or unreadable media (transparent PNG / silent WAV
+  placeholders), MD5 asset filenames, costume rotation centres, bitmap
+  resolution, and sound rate/sample count;
+- extension declarations inferred from block and monitor opcodes.
+
+The repair output is validated again with the same strict checker before the
+page offers a download. The checker separates errors (the project cannot be
+loaded/edited reliably) from warnings (tolerated by Scratch but worth fixing).
+Data cut off the end of a truncated `project.json` cannot be reconstructed;
+the report says what was dropped.
+
 ### Analyzer
 
 - the **`project.json` size**, with a bar against Scratch's 5 MB limit;
@@ -109,6 +141,7 @@ docs/                 the whole site (GitHub Pages serves this folder)
   media/              SB3 Media Compressor    (+ ja/)
   full/               SB3 Full Compressor     (+ ja/)
   analyzer/           SB3 Analyzer            (+ ja/)
+  repair/             SB3 Repair              (+ ja/)
   .nojekyll           keeps Jekyll away from the folder
   <tool>/             index.html · app.js · worker.js · styles.css · …
                       media/ and full/ also carry vendor/ codecs

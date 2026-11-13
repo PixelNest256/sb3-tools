@@ -3,8 +3,8 @@
 [English](README.md) · **日本語**
 
 **Scratch / TurboWarp の `.sb3`** プロジェクト向けの、ブラウザだけで動くツール集です。
-圧縮ツールが3つ、解析ツールが1つ。すべてタブ内で完結し、アップロードも
-インストールも不要です。サイト自体にビルド手順はありません。
+圧縮ツールが3つ、解析ツールが1つ、検証・修復ツールが1つ。すべてタブ内で完結し、
+アップロードもインストールも不要です。サイト自体にビルド手順はありません。
 
 **公開サイト:** <https://pixelnest256.github.io/sb3-tools/>
 · 日本語版: <https://pixelnest256.github.io/sb3-tools/ja/>
@@ -17,9 +17,11 @@
 | `/media/` | **SB3 Media Compressor** | コスチュームと音（PNG・JPEG・SVG・WAV・MP3）を再エンコードします。`project.json` が変わるのは、WAV→MP3 や SVG→PNG の変換でそのアセットの項目を書き換えた場合だけです。 |
 | `/full/` | **SB3 Full Compressor** | 同じファイルに両方の処理を実行し、梱包は1回だけ行います。 |
 | `/analyzer/` | **SB3 Analyzer** | 容量とブロックがどこにあるかを表示し、Scratch の上限に対して警告します。何も書き出しません。 |
+| `/repair/` | **SB3 Repair** | プロジェクトを厳格に検証し、壊れた ZIP や `project.json` を復元します。ブロック参照・変数・アセット・モニターを修復し、読み込める `.sb3` を書き出します。 |
 
 各ツールには英語ページと日本語ページ（`…/ja/`）があります。編集するときは
-`docs/sb3/`、`docs/media/`、`docs/full/`、`docs/analyzer/` を触ってください。
+`docs/sb3/`、`docs/media/`、`docs/full/`、`docs/analyzer/`、`docs/repair/` を
+触ってください。
 
 ## 圧縮の中身
 
@@ -91,6 +93,34 @@ Worker がタブに RGBA ピクセルを要求し、パレット PNG はタブ�
 分散するので、コスチュームの多いプロジェクトでも数倍速く終わります。ネスト
 Worker が使えない環境では、単一の Worker にフォールバックします。
 
+### 修復
+
+`docs/repair/repair.js` は、ページと Node の検証で共有する独立したエンジンです。
+ZIP の中央ディレクトリだけに頼らずローカルヘッダーも走査するため、EOCD や
+中央ディレクトリが欠けたアーカイブも復元できます。`project.json` は BOM、
+NUL、Scratch 2.0 のバックスペース、生の制御文字、数値の先頭ゼロ、欠けた
+カンマ／末尾カンマ、閉じ引用符の欠落、オブジェクトを閉じる `]`、Python の
+`True`/`False`/`None`、単数形の `target` キー、途中で切れた JSON、
+大文字の `Project.json` などを段階的に復元してから、構造の修復に進みます。
+
+構造の修復では次を検証・修復します。
+
+- ステージの有無と順序、ターゲットの既定値、layerOrder、各コンテナ
+- 存在しない `next`・`parent`・入力参照、入力の循環、`topLevel`/`shadow`、
+  不正なトップレベルプリミティブ
+- 未宣言の変数・リスト・ブロードキャスト（正しいスコープに作成）、
+  安全でないストア ID、モニターの参照
+- カスタムブロックの定義・プロトタイプ・mutation、定義のない呼び出し
+- アセットのメタデータ、不足・破損メディア（透明 PNG／無音 WAV の
+  プレースホルダー）、MD5 名への変更、回転中心、bitmapResolution、
+  音のサンプルレート／サンプル数
+- ブロックとモニターの opcode から推定した拡張機能の宣言
+
+修復後は同じ厳格な検証器で再検証してからダウンロードを提供します。
+検証器は、読み込み・編集の信頼性を損なう「エラー」と、Scratch が許容する
+「警告」を分けて表示します。途中で切れた `project.json` の失われた末尾は
+復元できません。レポートに何を落としたかを表示します。
+
 ### Analyzer
 
 - **`project.json` のサイズ**（Scratch の 5 MB 上限に対するバー付き）。
@@ -109,6 +139,7 @@ docs/                 サイト全体（GitHub Pages はこのフォルダを配
   media/              SB3 Media Compressor    (+ ja/)
   full/               SB3 Full Compressor     (+ ja/)
   analyzer/           SB3 Analyzer            (+ ja/)
+  repair/             SB3 Repair              (+ ja/)
   .nojekyll           Jekyll に触らせないための空ファイル
   <tool>/             index.html · app.js · worker.js · styles.css · …
                       media/ と full/ は vendor/ のコーデックも持ちます

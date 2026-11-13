@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>SB3 Tools — browser utilities for Scratch projects</title>
-<meta name="description" content="Three browser tools for Scratch and TurboWarp .sb3 files: a project.json compressor, a costume/sound media compressor, and a combined one. Nothing is uploaded.">
+<meta name="description" content="Five browser tools for Scratch and TurboWarp .sb3 files: a project.json compressor, a costume/sound media compressor, a combined compressor, an analyzer, and a validator/repair tool. Nothing is uploaded.">
 <meta name="theme-color" content="#e7e8e1">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' fill='%23171a16'/%3E%3Crect x='6' y='7' width='20' height='6' fill='%23e7e8e1'/%3E%3Crect x='6' y='16' width='11' height='9' fill='%23e14b12'/%3E%3Crect x='19' y='16' width='7' height='9' fill='%23565a4e'/%3E%3C/svg%3E">
 <script>
@@ -44,12 +44,13 @@
   <main>
     <section class="intro">
       <p class="eyebrow">Browser tools for Scratch and TurboWarp files</p>
-      <h1>Compress them,<br>or see what's inside.</h1>
+      <h1>Compress them, inspect them,<br>or put them back together.</h1>
       <p class="lead">
-        Four tools for <code>.sb3</code> files. Three compress — the
+        Five tools for <code>.sb3</code> files. Three compress — the
         <code>project.json</code> logic, the costumes and sounds, or both at
-        once — and one reports where the bytes and blocks go. All run entirely
-        in your browser — no upload, no install.
+        once — one reports where the bytes and blocks go, and one validates and
+        repairs a damaged file. All run entirely in your browser — no upload, no
+        install.
       </p>
     </section>
 
@@ -136,6 +137,28 @@
         <div class="actions">
           <a class="btn" href="analyzer/">Open the tool</a>
           <a class="btn-quiet" href="analyzer/ja/">日本語</a>
+        </div>
+      </section>
+
+      <section class="card card-wide" aria-labelledby="card-repair">
+        <div class="card-head">
+          <span class="card-glyph" aria-hidden="true">FIX</span>
+          <h2 id="card-repair">SB3 Repair</h2>
+        </div>
+        <p class="card-sub">Validate · recover · repair</p>
+        <p class="body">
+          Reads a damaged <code>.sb3</code> and checks it against the Scratch
+          project structure. It can salvage a broken ZIP, recover a damaged
+          <code>project.json</code>, repair dangling block links, missing stores,
+          media placeholders and stale monitors, then writes a loadable file.
+        </p>
+        <dl class="spec">
+          <div><dt>Reads</dt><dd>.sb3 / project.json</dd></div>
+          <div><dt>Writes</dt><dd>*_repaired.sb3</dd></div>
+        </dl>
+        <div class="actions">
+          <a class="btn" href="repair/">Open the tool</a>
+          <a class="btn-quiet" href="repair/ja/">日本語</a>
         </div>
       </section>
     </div>
