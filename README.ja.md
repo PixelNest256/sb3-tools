@@ -3,7 +3,7 @@
 [English](README.md) · **日本語**
 
 **Scratch / TurboWarp の `.sb3`** プロジェクト向けの、ブラウザだけで動くツール集です。
-圧縮ツールが3つ、解析ツールが1つ、検証・修復ツールが1つ。すべてタブ内で完結し、
+圧縮ツールが3つ、解析ツールが1つ、検証・修復ツールが1つ、透かしチェッカーが1つ。すべてタブ内で完結し、
 アップロードもインストールも不要です。サイト自体にビルド手順はありません。
 
 **公開サイト:** <https://pixelnest256.github.io/sb3-tools/>
@@ -13,15 +13,17 @@
 
 | パス | ツール | 内容 |
 | --- | --- | --- |
-| `/sb3/` | **project.json Compressor** | 動作を変えずに `project.json` を小さくします。コスチュームと音はそのままコピーされます。 |
-| `/media/` | **SB3 Media Compressor** | コスチュームと音（PNG・JPEG・SVG・WAV・MP3）を再エンコードします。`project.json` が変わるのは、WAV→MP3 や SVG→PNG の変換でそのアセットの項目を書き換えた場合だけです。 |
+| `/sb3/` | **project.json Compressor** | 動作を変えずに `project.json` を小さくします。SVG コスチュームには小さな透かしが入り、それ以外のメディアはそのままコピーされます。 |
+| `/media/` | **SB3 Media Compressor** | コスチュームと音（PNG・JPEG・SVG・WAV・MP3）を再エンコードし、SVGO の後に SVG 透かしを入れます。`project.json` は形式変換か、透かし後の SVG の新しいアセット ID で変わります。 |
 | `/full/` | **SB3 Full Compressor** | 同じファイルに両方の処理を実行し、梱包は1回だけ行います。 |
 | `/analyzer/` | **SB3 Analyzer** | 容量とブロックがどこにあるかを表示し、Scratch の上限に対して警告します。何も書き出しません。 |
 | `/repair/` | **SB3 Repair** | プロジェクトを厳格に検証し、壊れた ZIP や `project.json` を復元します。ブロック参照・変数・アセット・モニターを修復し、読み込める `.sb3` を書き出します。 |
+| `/watermark/` | **SB3 Watermark Checker** | 各 SVG コスチュームの SB3 Tools 透かしから、圧縮日時（UTC）・元のプロジェクト名・ツールのバージョン・オプションを読み取ります。JSON レポートだけを書き出します。 |
 
 各ツールには英語ページと日本語ページ（`…/ja/`）があります。編集するときは
-`docs/sb3/`、`docs/media/`、`docs/full/`、`docs/analyzer/`、`docs/repair/` を
-触ってください。
+`docs/sb3/`、`docs/media/`、`docs/full/`、`docs/analyzer/`、`docs/repair/`、
+`docs/watermark/` を触ってください。透かしのエンコーダーは共有の
+`docs/watermark.js` にあり、圧縮ページと Worker はそこから読み込みます。
 
 ## 圧縮の中身
 
@@ -82,7 +84,8 @@ Scratch VM が依存する目印（明示的な `parent: null` と、スタッ�
 
 アセットの置き換えは、新しいバイト列が実際に小さくなったときだけ行います。
 WAV→MP3 と SVG→PNG の変換では、`project.json` のそのアセットの `assetId`、
-`md5ext`、`dataFormat` を書き換えます。ラスタライズしたコスチュームは回転中心を
+`md5ext`、`dataFormat` を書き換えます。SVG に透かしを入れた場合も、SVG の
+バイト列がそれ以外で変わっていなくても `assetId`/`md5ext` を更新します。ラスタライズしたコスチュームは回転中心を
 引き継ぎ、`bitmapResolution: 1` が付くので、Scratch 上では同じ大きさで描かれます。
 SVG を描画できなかった場合（ラスタ結果が空になった場合）は、SVG のまま残します。
 
@@ -121,6 +124,36 @@ NUL、Scratch 2.0 のバックスペース、生の制御文字、数値の先�
 「警告」を分けて表示します。途中で切れた `project.json` の失われた末尾は
 復元できません。レポートに何を落としたかを表示します。
 
+### 透かし
+
+3つの圧縮ツールは、出力に残る参照済みの SVG コスチュームすべてに
+小さな透かしを入れます。統合圧縮とメディア圧縮は SVGO の後に透かしを入れるため、
+最適化で消えることはありません。ルートの `<svg>` 要素の直後に入る XML コメントなので、
+Scratch / TurboWarp は無視し、通常のプロジェクト保存ではアセットがそのまま
+コピーされます:
+
+```xml
+<!-- SB3TOOLS-WATERMARK:1:<base64(JSON)> -->
+```
+
+ペイロードは `s`（スキーマ）、`k`（`project`・`media`・`full`）、`t`（UTC 日時）、
+`n`（元のファイル名）、`v`（ツールのバージョン）、`o`（プロジェクトオプションの
+ビット列）、メディア圧縮・統合圧縮ではさらに `m`（メディアオプションのビット列）
+を持つ JSON です。ビット列は `docs/watermark.js` が公開する固定順で、最下位
+ビットから詰めます。プロジェクト圧縮は26個、メディア圧縮・統合圧縮はさらに
+5個のメディアフラグを持ち、チェッカーは両方を復号します。
+
+SVG のバイト列が変わると MD5 も変わるため、圧縮ツールは同じ旧アセットを
+共有していたすべてのコスチュームの `assetId`/`md5ext` を更新します。既存の
+透かしは新しいものを入れる前に除去するので、同じ情報での再圧縮は冪等になり、
+情報が変わっていれば古いペイロードを置き換えます。統合圧縮とメディア圧縮は
+メディア圧縮の後に透かしを入れるため、その工程の SVGO で消えることはありません。
+
+通常の Scratch / TurboWarp の保存では残りますが、SVG 自体を書き換えるツール
+（SVGO やベクターエディタなど）では XML コメントが消えることがあります。
+`/watermark/` のチェッカーは、プロジェクトを変更せずに、透かしあり・なし・
+不正・混在を報告します。
+
 ### Analyzer
 
 - **`project.json` のサイズ**（Scratch の 5 MB 上限に対するバー付き）。
@@ -140,6 +173,8 @@ docs/                 サイト全体（GitHub Pages はこのフォルダを配
   full/               SB3 Full Compressor     (+ ja/)
   analyzer/           SB3 Analyzer            (+ ja/)
   repair/             SB3 Repair              (+ ja/)
+  watermark/          SB3 Watermark Checker   (+ ja/)
+  watermark.js        共有の透かしエンコーダー／デコーダー
   .nojekyll           Jekyll に触らせないための空ファイル
   <tool>/             index.html · app.js · worker.js · styles.css · …
                       media/ と full/ は vendor/ のコーデックも持ちます
@@ -157,11 +192,17 @@ Scratch VM とエディタが依存する不変条件を検証します。すべ
 `tagName` と `children` が保たれること、トップレベルのブロックが
 `parent: null` を持つこと、到達可能なスタック末尾が `next: null` を持つこと、
 入力やフィールドが削除済みの何かを指していないこと、初期値の空化が意味のある
-容量削減になるときだけ行われること。`docs/sb3/compressor.js` または
-`docs/full/project.js` を触ったあとに実行してください:
+容量削減になるときだけ行われること。
+
+`build/check/watermark-invariants.mjs` は、Node の MD5 との一致、固定順の
+オプションビット、アセット ID／MD5 の更新、重複ではなく置換、冪等性、
+プロジェクト圧縮後の SVG バイト列を検証します。
+
+圧縮ツールまたは `docs/watermark.js` を触ったあとに両方を実行してください:
 
 ```console
 node build/check/compress-invariants.mjs
+node build/check/watermark-invariants.mjs
 ```
 
 ## 同梱コーデック

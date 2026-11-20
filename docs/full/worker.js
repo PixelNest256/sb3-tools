@@ -7,10 +7,12 @@
  */
 "use strict";
 
-importScripts("jszip.min.js", "media.js", "project.js", "engine.js");
+importScripts("jszip.min.js", "../watermark.js", "media.js", "project.js", "engine.js");
 
 if (typeof MEDIA !== "undefined" && typeof JSZip !== "undefined") MEDIA.setJSZip(JSZip);
 if (typeof SB3 !== "undefined" && typeof JSZip !== "undefined") SB3.setJSZip(JSZip);
+if (typeof SB3 !== "undefined" && typeof SB3Watermark !== "undefined" &&
+    typeof SB3.setWatermark === "function") SB3.setWatermark(SB3Watermark);
 
 // ------------------------------------------------------------------
 // SVG rasterising is done by the page: workers cannot decode SVG.

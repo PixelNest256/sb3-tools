@@ -1,0 +1,217 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SB3 透かしチェッカー — SB3 Tools の透かしを読む</title>
+<meta name="description" content="Scratch / TurboWarp の .sb3 に含まれる SVG コスチュームから SB3 Tools の透かしを読み取り、圧縮日時（UTC）・圧縮前のプロジェクト名・ツールのバージョン・使用したオプションを表示します。アップロードはありません。">
+<meta name="theme-color" content="#e7e8e1">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' fill='%23171a16'/%3E%3Cpath d='M8 9h16v4H8zm0 6h16v4H8zm0 6h10v4H8z' fill='%23e7e8e1'/%3E%3Crect x='22' y='20' width='4' height='8' fill='%23e14b12'/%3E%3C/svg%3E">
+<script>
+(function () {
+  var saved = null;
+  try { saved = localStorage.getItem("sb3-watermark-theme-v1"); } catch (e) {}
+  var dark = saved ? saved === "dark"
+    : !!(window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches);
+  document.documentElement.setAttribute("data-theme", dark ? "dark" : "light");
+  var meta = document.querySelector('meta[name="theme-color"]');
+  if (meta) meta.setAttribute("content", dark ? "#15180f" : "#e7e8e1");
+})();
+</script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=Barlow:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans+JP:wght@400;500;700&display=swap">
+<link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+<a class="skip-link" href="#main">透かしチェッカーへ</a>
+
+<div class="sheet">
+  <header class="masthead">
+    <div class="brand">
+      <a class="brand-home" href="../../" aria-label="SB3 透かしチェッカー — ホーム">
+        <span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i></span>
+        <span class="brand-name">SB3 Watermark Checker</span>
+      </a>
+      <span class="brand-sub">圧縮の記録</span>
+    </div>
+    <div class="masthead-links">
+      <details class="tool-menu">
+        <summary aria-label="ツール一覧">
+          <span class="menu-bars" aria-hidden="true"><i></i><i></i><i></i></span>
+        </summary>
+        <nav class="tool-menu-panel" aria-label="ツール一覧">
+          <a href="../../">ホーム</a>
+          <a href="../../sb3/ja/">project.json 圧縮</a>
+          <a href="../../media/ja/">メディア圧縮</a>
+          <a href="../../full/ja/">統合圧縮</a>
+          <a href="../../analyzer/ja/">アナライザー</a>
+          <a href="../../repair/ja/">修復ツール</a>
+          <a href="../" aria-current="page">透かしチェッカー</a>
+        </nav>
+      </details>
+      <a class="lang-link" href="../" hreflang="en" lang="en">English</a>
+      <div class="theme-switch" role="group" aria-label="配色">
+        <button type="button" data-theme-set="light">ライト</button>
+        <button type="button" data-theme-set="dark">ダーク</button>
+      </div>
+    </div>
+  </header>
+
+  <main id="main" class="analyzer-layout watermark-main">
+    <div class="analyzer-main">
+      <section class="intro" aria-labelledby="page-title">
+        <p class="eyebrow">SB3 Tools で作った .sb3 向け</p>
+        <h1 id="page-title">透かしを読み、<br>設定を復元する。</h1>
+        <p class="lead">
+          すべての SVG コスチュームから SB3 Tools の透かしを見つけ、圧縮日時（UTC）、
+          圧縮前のプロジェクト名、ツールのバージョン、使用したオプションを読み取ります。
+          アップロードはありません。
+        </p>
+        <p class="html-note">
+          <strong>保存方法。</strong>
+          透かしは各 SVG コスチューム内の XML コメントです。Scratch / TurboWarp の
+          通常の保存では無視され、アセットの MD5 もバイト列と一致したままです。
+          SVG 自体を書き換えるツールや最適化ツールでは消えることがあります。
+        </p>
+      </section>
+
+      <section class="panel input-panel" aria-labelledby="input-title">
+        <div class="panel-head">
+          <h2 id="input-title">入力</h2>
+          <span class="panel-meta">.sb3</span>
+        </div>
+        <div id="dropzone" class="dropzone" role="button" tabindex="0"
+             aria-describedby="drop-hint" aria-label=".sb3 を選ぶ">
+          <span class="corner tl" aria-hidden="true"></span>
+          <span class="corner tr" aria-hidden="true"></span>
+          <span class="corner bl" aria-hidden="true"></span>
+          <span class="corner br" aria-hidden="true"></span>
+          <span class="drop-glyph" aria-hidden="true">.sb3</span>
+          <p class="drop-title">ここにプロジェクトをドロップ</p>
+          <p class="drop-hint" id="drop-hint">または <span class="linkish">ファイルを選択</span></p>
+        </div>
+        <input type="file" id="fileInput" class="visually-hidden" accept=".sb3,application/zip">
+        <div id="fileRow" class="file-row" hidden>
+          <div class="file-meta">
+            <span class="file-name" id="fileName">project.sb3</span>
+            <span class="file-size" id="fileSize">—</span>
+          </div>
+          <button type="button" id="clearBtn" class="text-btn">削除</button>
+        </div>
+        <p class="hint">チェッカーはアーカイブをローカルで読み取ります。SVG は描画せずに調べます。</p>
+      </section>
+
+      <div id="report" hidden>
+        <section class="report" aria-labelledby="summary-title">
+          <div class="panel-head">
+            <h2 id="summary-title">概要</h2>
+            <span class="head-rule" aria-hidden="true"></span>
+            <span class="panel-meta">透かしスキャン</span>
+          </div>
+          <div class="summary-grid" id="summaryGrid"></div>
+        </section>
+
+        <section class="report" id="recordSection" aria-labelledby="record-title" hidden>
+          <div class="panel-head">
+            <h2 id="record-title">透かし</h2>
+            <span class="head-rule" aria-hidden="true"></span>
+            <span class="panel-meta" id="recordMeta">—</span>
+          </div>
+          <div id="recordBox"></div>
+        </section>
+
+        <section class="report" id="flagsSection" aria-labelledby="flags-title" hidden>
+          <div class="panel-head">
+            <h2 id="flags-title">オプションフラグ</h2>
+            <span class="head-rule" aria-hidden="true"></span>
+            <span class="panel-meta" id="flagsMeta">—</span>
+          </div>
+          <div class="flag-grid" id="flagGrid"></div>
+        </section>
+
+        <section class="report" id="assetsSection" aria-labelledby="assets-title" hidden>
+          <div class="panel-head">
+            <h2 id="assets-title">SVG アセット</h2>
+            <span class="head-rule" aria-hidden="true"></span>
+            <span class="panel-meta" id="assetsMeta">—</span>
+          </div>
+          <div class="tbl-scroll">
+            <table class="dtbl wm-table">
+              <thead>
+                <tr>
+                  <th scope="col">アセット</th>
+                  <th scope="col">使用先</th>
+                  <th scope="col">透かし</th>
+                  <th scope="col">日時（UTC）</th>
+                  <th scope="col">元の名前</th>
+                  <th scope="col">バージョン</th>
+                </tr>
+              </thead>
+              <tbody id="assetsTbody"></tbody>
+            </table>
+          </div>
+        </section>
+      </div>
+    </div>
+
+    <aside class="analyzer-side" aria-label="透かしの概要">
+      <section class="readout" aria-labelledby="readout-title">
+        <div class="readout-head">
+          <h2 id="readout-title">透かし</h2>
+          <span class="stamp" aria-hidden="true">Local<br>only</span>
+        </div>
+
+        <div class="size-pair">
+          <div class="size-row"><span class="label">入力</span><span class="value" id="fileValue">—</span></div>
+          <div class="size-row"><span class="label">SVG コスチューム</span><span class="value" id="costumeValue">—</span></div>
+          <div class="size-row"><span class="label">SVG アセット</span><span class="value" id="assetValue">—</span></div>
+          <div class="size-row"><span class="label">レコード</span><span class="value" id="recordValue">—</span></div>
+        </div>
+
+        <div class="stat-pair">
+          <div class="stat-line"><span class="label">透かしあり</span><span class="value" id="markedValue">—</span></div>
+          <div class="stat-line"><span class="label">透かしなし</span><span class="value" id="unmarkedValue">—</span></div>
+          <div class="stat-line"><span class="label">不正なペイロード</span><span class="value" id="invalidValue">—</span></div>
+          <div class="stat-line"><span class="label">異なるペイロード</span><span class="value" id="uniqueValue">—</span></div>
+        </div>
+
+        <div class="status-row">
+          <span class="label">状態</span>
+          <span class="status-value" id="statusValue">—</span>
+          <span class="tag" id="statusTag" hidden></span>
+        </div>
+
+        <p class="limit-note" id="statusNote">プロジェクトを選ぶと透かしを読み取ります。</p>
+        <p class="run-message" id="phaseLabel" aria-live="polite">準備完了</p>
+
+        <div class="readout-actions">
+          <button type="button" id="copyBtn" class="btn-quiet" disabled>JSON レポートをコピー</button>
+          <a class="btn-quiet" id="downloadReport" href="#" download hidden>JSON レポートをダウンロード</a>
+        </div>
+
+        <div class="readout-foot">
+          <span>Engine: SB3 Watermark</span>
+          <span id="engineVersion">v1.0</span>
+        </div>
+      </section>
+    </aside>
+  </main>
+
+  <footer class="footer">
+    <p><strong>SB3 Watermark Checker</strong> · すべてブラウザ内で処理され、ファイルは送信されません。</p>
+    <p class="footer-links">
+      <a class="footer-feedback" href="https://scratch.mit.edu/projects/1395313805/" rel="noopener" title="Scratch でコメント・フィードバック">フィードバック ↗</a>
+      <span aria-hidden="true">/</span>
+      <a href="https://github.com/PixelNest256/sb3-tools" rel="noopener">GitHub リポジトリ ↗</a>
+      <span aria-hidden="true">/</span>
+      <span>MIT ライセンス</span>
+    </p>
+  </footer>
+</div>
+
+<script src="../jszip.min.js"></script>
+<script src="../../watermark.js"></script>
+<script src="../app.js"></script>
+</body>
+</html>

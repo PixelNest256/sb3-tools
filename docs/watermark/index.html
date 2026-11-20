@@ -1,0 +1,218 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SB3 Watermark Checker — read an SB3 Tools watermark</title>
+<meta name="description" content="Read the SB3 Tools watermark from every SVG costume in a Scratch or TurboWarp .sb3: compression time (UTC), original project name, tool version, and the exact compressor options used. Nothing is uploaded.">
+<meta name="theme-color" content="#e7e8e1">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' fill='%23171a16'/%3E%3Cpath d='M8 9h16v4H8zm0 6h16v4H8zm0 6h10v4H8z' fill='%23e7e8e1'/%3E%3Crect x='22' y='20' width='4' height='8' fill='%23e14b12'/%3E%3C/svg%3E">
+<script>
+(function () {
+  var saved = null;
+  try { saved = localStorage.getItem("sb3-watermark-theme-v1"); } catch (e) {}
+  var dark = saved ? saved === "dark"
+    : !!(window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches);
+  document.documentElement.setAttribute("data-theme", dark ? "dark" : "light");
+  var meta = document.querySelector('meta[name="theme-color"]');
+  if (meta) meta.setAttribute("content", dark ? "#15180f" : "#e7e8e1");
+})();
+</script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=Barlow:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<a class="skip-link" href="#main">Skip to the watermark checker</a>
+
+<div class="sheet">
+  <header class="masthead">
+    <div class="brand">
+      <a class="brand-home" href="../" aria-label="SB3 Watermark Checker — home">
+        <span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i></span>
+        <span class="brand-name">SB3 Watermark Checker</span>
+      </a>
+      <span class="brand-sub">compression provenance</span>
+    </div>
+    <div class="masthead-links">
+      <details class="tool-menu">
+        <summary aria-label="Tools">
+          <span class="menu-bars" aria-hidden="true"><i></i><i></i><i></i></span>
+        </summary>
+        <nav class="tool-menu-panel" aria-label="Tools">
+          <a href="../">Home</a>
+          <a href="../sb3/">project.json Compressor</a>
+          <a href="../media/">SB3 Media Compressor</a>
+          <a href="../full/">SB3 Full Compressor</a>
+          <a href="../analyzer/">SB3 Analyzer</a>
+          <a href="../repair/">SB3 Repair</a>
+          <a href="../watermark/" aria-current="page">SB3 Watermark Checker</a>
+        </nav>
+      </details>
+      <a class="lang-link" href="ja/" hreflang="ja" lang="ja">日本語</a>
+      <div class="theme-switch" role="group" aria-label="Color theme">
+        <button type="button" data-theme-set="light">Light</button>
+        <button type="button" data-theme-set="dark">Dark</button>
+      </div>
+    </div>
+  </header>
+
+  <main id="main" class="analyzer-layout watermark-main">
+    <div class="analyzer-main">
+      <section class="intro" aria-labelledby="page-title">
+        <p class="eyebrow">For .sb3 files made by SB3 Tools</p>
+        <h1 id="page-title">Read the mark.<br>Recover the settings.</h1>
+        <p class="lead">
+          Finds the SB3 Tools watermark in every SVG costume and reads back the
+          UTC compression time, the original project name, the tool version and
+          the exact option flags used by the compressor. Nothing is uploaded.
+        </p>
+        <p class="html-note">
+          <strong>How it is stored.</strong>
+          The watermark is an XML comment in each SVG costume. It is ignored by
+          Scratch and TurboWarp during normal project saves, and the asset's
+          MD5 stays consistent with its bytes. A tool that rewrites or
+          optimises the SVG itself may remove it.
+        </p>
+      </section>
+
+      <section class="panel input-panel" aria-labelledby="input-title">
+        <div class="panel-head">
+          <h2 id="input-title">Input</h2>
+          <span class="panel-meta">.sb3</span>
+        </div>
+        <div id="dropzone" class="dropzone" role="button" tabindex="0"
+             aria-describedby="drop-hint" aria-label="Choose an .sb3 file">
+          <span class="corner tl" aria-hidden="true"></span>
+          <span class="corner tr" aria-hidden="true"></span>
+          <span class="corner bl" aria-hidden="true"></span>
+          <span class="corner br" aria-hidden="true"></span>
+          <span class="drop-glyph" aria-hidden="true">.sb3</span>
+          <p class="drop-title">Drop a project here</p>
+          <p class="drop-hint" id="drop-hint">or <span class="linkish">choose a file</span> from your computer</p>
+        </div>
+        <input type="file" id="fileInput" class="visually-hidden" accept=".sb3,application/zip">
+        <div id="fileRow" class="file-row" hidden>
+          <div class="file-meta">
+            <span class="file-name" id="fileName">project.sb3</span>
+            <span class="file-size" id="fileSize">—</span>
+          </div>
+          <button type="button" id="clearBtn" class="text-btn">Remove</button>
+        </div>
+        <p class="hint">The checker reads the archive locally. SVG costumes are inspected without rendering them.</p>
+      </section>
+
+      <div id="report" hidden>
+        <section class="report" aria-labelledby="summary-title">
+          <div class="panel-head">
+            <h2 id="summary-title">Summary</h2>
+            <span class="head-rule" aria-hidden="true"></span>
+            <span class="panel-meta">watermark scan</span>
+          </div>
+          <div class="summary-grid" id="summaryGrid"></div>
+        </section>
+
+        <section class="report" id="recordSection" aria-labelledby="record-title" hidden>
+          <div class="panel-head">
+            <h2 id="record-title">Watermark</h2>
+            <span class="head-rule" aria-hidden="true"></span>
+            <span class="panel-meta" id="recordMeta">—</span>
+          </div>
+          <div id="recordBox"></div>
+        </section>
+
+        <section class="report" id="flagsSection" aria-labelledby="flags-title" hidden>
+          <div class="panel-head">
+            <h2 id="flags-title">Option flags</h2>
+            <span class="head-rule" aria-hidden="true"></span>
+            <span class="panel-meta" id="flagsMeta">—</span>
+          </div>
+          <div class="flag-grid" id="flagGrid"></div>
+        </section>
+
+        <section class="report" id="assetsSection" aria-labelledby="assets-title" hidden>
+          <div class="panel-head">
+            <h2 id="assets-title">SVG assets</h2>
+            <span class="head-rule" aria-hidden="true"></span>
+            <span class="panel-meta" id="assetsMeta">—</span>
+          </div>
+          <div class="tbl-scroll">
+            <table class="dtbl wm-table">
+              <thead>
+                <tr>
+                  <th scope="col">Asset</th>
+                  <th scope="col">Used by</th>
+                  <th scope="col">Mark</th>
+                  <th scope="col">Timestamp (UTC)</th>
+                  <th scope="col">Original name</th>
+                  <th scope="col">Version</th>
+                </tr>
+              </thead>
+              <tbody id="assetsTbody"></tbody>
+            </table>
+          </div>
+        </section>
+      </div>
+    </div>
+
+    <aside class="analyzer-side" aria-label="Watermark summary">
+      <section class="readout" aria-labelledby="readout-title">
+        <div class="readout-head">
+          <h2 id="readout-title">Watermark</h2>
+          <span class="stamp" aria-hidden="true">Local<br>only</span>
+        </div>
+
+        <div class="size-pair">
+          <div class="size-row"><span class="label">input</span><span class="value" id="fileValue">—</span></div>
+          <div class="size-row"><span class="label">SVG costumes</span><span class="value" id="costumeValue">—</span></div>
+          <div class="size-row"><span class="label">SVG assets</span><span class="value" id="assetValue">—</span></div>
+          <div class="size-row"><span class="label">records</span><span class="value" id="recordValue">—</span></div>
+        </div>
+
+        <div class="stat-pair">
+          <div class="stat-line"><span class="label">marked assets</span><span class="value" id="markedValue">—</span></div>
+          <div class="stat-line"><span class="label">unmarked assets</span><span class="value" id="unmarkedValue">—</span></div>
+          <div class="stat-line"><span class="label">invalid payloads</span><span class="value" id="invalidValue">—</span></div>
+          <div class="stat-line"><span class="label">unique payloads</span><span class="value" id="uniqueValue">—</span></div>
+        </div>
+
+        <div class="status-row">
+          <span class="label">status</span>
+          <span class="status-value" id="statusValue">—</span>
+          <span class="tag" id="statusTag" hidden></span>
+        </div>
+
+        <p class="limit-note" id="statusNote">Choose a project to read its watermark.</p>
+        <p class="run-message" id="phaseLabel" aria-live="polite">Ready</p>
+
+        <div class="readout-actions">
+          <button type="button" id="copyBtn" class="btn-quiet" disabled>Copy JSON report</button>
+          <a class="btn-quiet" id="downloadReport" href="#" download hidden>Download JSON report</a>
+        </div>
+
+        <div class="readout-foot">
+          <span>Engine: SB3 Watermark</span>
+          <span id="engineVersion">v1.0</span>
+        </div>
+      </section>
+    </aside>
+  </main>
+
+  <footer class="footer">
+    <p><strong>SB3 Watermark Checker</strong> · everything runs in your browser; files are never uploaded.</p>
+    <p class="footer-links">
+      <a class="footer-feedback" href="https://scratch.mit.edu/projects/1395313805/" rel="noopener" title="Comments and feedback on Scratch">Feedback ↗</a>
+      <span aria-hidden="true">/</span>
+      <a href="https://github.com/PixelNest256/sb3-tools" rel="noopener">GitHub repository ↗</a>
+      <span aria-hidden="true">/</span>
+      <span>MIT License</span>
+    </p>
+  </footer>
+</div>
+
+<script src="jszip.min.js"></script>
+<script src="../watermark.js"></script>
+<script src="app.js"></script>
+</body>
+</html>

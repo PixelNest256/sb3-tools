@@ -49,6 +49,7 @@
           <a href="../full/">SB3 Full Compressor</a>
           <a href="../analyzer/">SB3 Analyzer</a>
           <a href="../repair/">SB3 Repair</a>
+          <a href="../watermark/">SB3 Watermark Checker</a>
         </nav>
       </details>
       <a class="lang-link" href="ja/" hreflang="ja" lang="ja">日本語</a>
@@ -68,8 +69,9 @@
           Costumes and sounds make most <code>.sb3</code> files heavy. This
           reclaims space by re-encoding images, trimming or rasterising SVG art, and
           resampling audio — then repacks the file. Your scripts are left
-          untouched, and <code>project.json</code> only changes where a conversion
-          replaces an asset's file.
+          untouched. SVG costumes receive a small SB3 Tools watermark after
+          optimisation, so <code>project.json</code> changes only for a converted
+          asset or a watermarked SVG's new asset ID.
         </p>
         <dl class="spec">
           <div><dt>Reads</dt><dd>.sb3</dd></div>
@@ -102,6 +104,7 @@
           </div>
           <button type="button" id="clearBtn" class="text-btn">Remove</button>
         </div>
+        <p class="hint">Every SVG costume receives a small SB3 Tools watermark after media compression, with the UTC time, original file name, version and option flags. <a href="../watermark/">Read it with the Watermark Checker</a>.</p>
       </section>
 
       <section class="panel options-panel" aria-labelledby="options-title">

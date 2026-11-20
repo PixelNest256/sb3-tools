@@ -7,10 +7,13 @@
  */
 "use strict";
 
-importScripts("jszip.min.js", "compressor.js");
+importScripts("jszip.min.js", "../watermark.js", "compressor.js");
 
 if (typeof MEDIA !== "undefined" && typeof JSZip !== "undefined") {
   MEDIA.setJSZip(JSZip);
+}
+if (typeof MEDIA !== "undefined" && typeof SB3Watermark !== "undefined") {
+  MEDIA.setWatermark(SB3Watermark);
 }
 
 // ------------------------------------------------------------------
@@ -192,6 +195,7 @@ self.onmessage = async (event) => {
         type: "done",
         container: result.container,
         finalBytes: result.finalBytes,
+        watermark: result.watermark,
         outputName: result.outputName,
         origFileSize: result.origFileSize,
         newFileSize: result.newFileSize,

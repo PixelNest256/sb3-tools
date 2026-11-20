@@ -25,6 +25,8 @@
   const G = (typeof self !== "undefined") ? self
     : (typeof globalThis !== "undefined" ? globalThis : {});
 
+  let watermarkApi = null;
+
   // ------------------------------------------------------------------
   // small helpers
 
@@ -1201,6 +1203,9 @@
 
   let JSZipLib = (typeof JSZip !== "undefined") ? JSZip : null;
   function setJSZip(lib) { JSZipLib = lib; }
+  function setWatermark(api) {
+    watermarkApi = api && typeof api.applyToProject === "function" ? api : null;
+  }
   function getJSZip() {
     if (!JSZipLib) throw new Error("The ZIP library is not loaded.");
     return JSZipLib;
@@ -1507,7 +1512,7 @@
       });
     }
 
-    const finalEntries = loaded.entries.map((entry) => {
+    let finalEntries = loaded.entries.map((entry) => {
       const replaced = byName.get(entry.name);
       if (replaced && replaced.name === entry.name && replaced.data !== entry.data) return replaced;
       const info = renames.get(entry.name);
@@ -1520,14 +1525,35 @@
 
     let projectBytes = loaded.pjRaw;
     let projectChanged = false;
-    if (renames.size) {
-      try {
-        const project = JSON.parse(new TextDecoder("utf-8").decode(loaded.pjRaw));
-        if (applyAssetRenames(project, renames)) {
-          projectBytes = new TextEncoder().encode(JSON.stringify(project));
-          projectChanged = true;
-        }
-      } catch (_) { /* keep original project.json on any parse trouble */ }
+    let project = null;
+    try {
+      project = JSON.parse(new TextDecoder("utf-8").decode(loaded.pjRaw));
+    } catch (_) { /* keep original project.json on any parse trouble */ }
+    if (project && renames.size && applyAssetRenames(project, renames)) {
+      projectBytes = new TextEncoder().encode(JSON.stringify(project));
+      projectChanged = true;
+    }
+
+    let watermark = null;
+    if (!opts.skipPackage && project && watermarkApi) {
+      const marked = watermarkApi.applyToProject(project, finalEntries, {
+        kind: "media",
+        name: filename,
+        version: watermarkApi.VERSION,
+        options: {},
+        media: opts
+      });
+      projectBytes = new TextEncoder().encode(JSON.stringify(marked.project));
+      finalEntries = marked.entries;
+      projectChanged = true;
+      watermark = {
+        watermarked: marked.watermarked,
+        skipped: marked.skipped,
+        mediaOptionsHex: marked.payload.m,
+        time: marked.payload.t,
+        name: marked.payload.n,
+        version: marked.payload.v
+      };
     }
 
     if (opts.skipPackage) {
@@ -1568,7 +1594,8 @@
       convertedCount: results.filter((r) => r.formatChanged).length,
       projectChanged,
       results,
-      mix: mixOf(inventory.assets)
+      mix: mixOf(inventory.assets),
+      watermark
     };
   }
 
@@ -1586,6 +1613,7 @@
 
   return {
     setJSZip,
+    setWatermark,
     setSvgRasterizer,
     scanBuffer,
     scanEntries,

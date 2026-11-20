@@ -3,7 +3,7 @@
 **English** · [日本語](README.ja.md)
 
 Browser-only utilities for **Scratch / TurboWarp `.sb3`** projects: three
-compressors, one analyzer, and one validator/repair tool. Everything runs
+compressors, one analyzer, one validator/repair tool, and a watermark checker. Everything runs
 inside the tab — there is no upload, no install, and no build step for the site
 itself.
 
@@ -14,14 +14,17 @@ itself.
 
 | Path | Tool | What it does |
 | --- | --- | --- |
-| `/sb3/` | **project.json Compressor** | Shrinks `project.json` without changing behavior. Costumes and sounds are copied through untouched. |
-| `/media/` | **SB3 Media Compressor** | Re-encodes the costumes and sounds (PNG, JPEG, SVG, WAV, MP3). `project.json` only changes where a WAV→MP3 or SVG→PNG conversion rewrites that asset's entry. |
+| `/sb3/` | **project.json Compressor** | Shrinks `project.json` without changing behavior. SVG costumes receive a small watermark; other media is copied through untouched. |
+| `/media/` | **SB3 Media Compressor** | Re-encodes the costumes and sounds (PNG, JPEG, SVG, WAV, MP3) and adds the SVG watermark after SVGO. `project.json` changes for a format conversion or the watermarked SVG's new asset ID. |
 | `/full/` | **SB3 Full Compressor** | Runs both passes on one file and repacks once. |
 | `/analyzer/` | **SB3 Analyzer** | Reports where the bytes and blocks go, with warnings against Scratch's upload limits. Writes nothing. |
 | `/repair/` | **SB3 Repair** | Strictly validates a project, salvages a broken ZIP or `project.json`, repairs block links, stores, assets and monitors, then writes a loadable `.sb3`. |
+| `/watermark/` | **SB3 Watermark Checker** | Reads the SB3 Tools watermark from every SVG costume: UTC compression time, original project name, tool version, and option flags. Writes only a JSON report. |
 
 Each tool has an English page and a Japanese page (`…/ja/`). Use `docs/sb3/`,
-`docs/media/`, `docs/full/`, `docs/analyzer/`, and `docs/repair/` when editing.
+`docs/media/`, `docs/full/`, `docs/analyzer/`, `docs/repair/`, and
+`docs/watermark/` when editing. The shared watermark encoder lives in
+`docs/watermark.js`; the compressor pages and workers load it from there.
 
 ## What the compressors do
 
@@ -82,7 +85,8 @@ end-of-stack `next: null`) are preserved.
 
 An asset is replaced only when the new bytes are actually smaller. A WAV→MP3
 conversion and an SVG→PNG conversion rewrite that asset's `assetId`, `md5ext`,
-and `dataFormat` in `project.json`. A rasterised costume keeps its rotation
+and `dataFormat` in `project.json`. Watermarking an SVG also rewrites its
+`assetId`/`md5ext`, even when the SVG bytes were otherwise unchanged. A rasterised costume keeps its rotation
 centre and gains `bitmapResolution: 1`, so Scratch draws it at the same size. If
 an SVG cannot be drawn (the raster comes back blank), it is kept as SVG.
 
@@ -123,6 +127,37 @@ loaded/edited reliably) from warnings (tolerated by Scratch but worth fixing).
 Data cut off the end of a truncated `project.json` cannot be reconstructed;
 the report says what was dropped.
 
+### Watermark
+
+All three compressors add a small watermark to every referenced SVG costume
+that survives their output. The full pass and the media pass apply it after
+SVGO, so the optimiser cannot strip it. It is an XML comment immediately after the root
+`<svg>` element, so Scratch and TurboWarp ignore it and a normal project save
+copies the asset through unchanged:
+
+```xml
+<!-- SB3TOOLS-WATERMARK:1:<base64(JSON)> -->
+```
+
+The payload is JSON with `s` (schema), `k` (`project`, `media`, or `full`),
+`t` (UTC timestamp), `n` (original file name), `v` (tool version), `o` (project
+option bits), and, for the media/full passes, `m` (media option bits). Option
+bits are packed least-significant-bit first in the fixed key order exported by
+`docs/watermark.js`; the project pass has 26 flags and the media/full passes
+add 5 media flags. The checker decodes both groups.
+
+Changing the SVG bytes changes its MD5, so the compressor updates the
+`assetId`/`md5ext` of every costume that shared the old asset. An existing
+watermark is stripped before a new one is inserted, which makes re-compression
+idempotent when the metadata is the same and replaces a stale payload when it
+is not. The full and media passes apply the watermark after media compression, so
+SVGO cannot remove it in those passes.
+
+The watermark survives a normal Scratch / TurboWarp save, but a tool that
+rewrites the SVG itself (for example SVGO or a vector editor) may remove an XML
+comment. The `/watermark/` checker reports marked, unmarked, invalid, and mixed
+payloads without modifying the project.
+
 ### Analyzer
 
 - the **`project.json` size**, with a bar against Scratch's 5 MB limit;
@@ -142,6 +177,8 @@ docs/                 the whole site (GitHub Pages serves this folder)
   full/               SB3 Full Compressor     (+ ja/)
   analyzer/           SB3 Analyzer            (+ ja/)
   repair/             SB3 Repair              (+ ja/)
+  watermark/          SB3 Watermark Checker   (+ ja/)
+  watermark.js        shared watermark encoder/decoder
   .nojekyll           keeps Jekyll away from the folder
   <tool>/             index.html · app.js · worker.js · styles.css · …
                       media/ and full/ also carry vendor/ codecs
@@ -159,11 +196,18 @@ asserts the invariants the Scratch VM and its editor rely on: every block
 mutation keeps `tagName` and `children`, top-level blocks keep
 `parent: null`, reachable stack ends keep `next: null`, no input or field points
 at something that was deleted, and initial-value blanking only happens when it
-saves a meaningful amount of JSON. Run it after touching
-`docs/sb3/compressor.js` or `docs/full/project.js`:
+saves a meaningful amount of JSON.
+
+`build/check/watermark-invariants.mjs` checks the watermark encoder against
+Node's MD5, the fixed option-bit order, the asset-ID/MD5 rewrite, replacement
+instead of duplication, idempotence, and the project compressor's final SVG
+bytes.
+
+Run both after touching the compressor or `docs/watermark.js`:
 
 ```console
 node build/check/compress-invariants.mjs
+node build/check/watermark-invariants.mjs
 ```
 
 ## Vendored codecs

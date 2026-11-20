@@ -688,11 +688,13 @@
   function loadMainThreadEngine() {
     if (mainThreadEngine) return mainThreadEngine;
     mainThreadEngine = loadScript(APP_BASE + "jszip.min.js")
+      .then(function () { return loadScript(APP_BASE + "../watermark.js"); })
       .then(function () { return loadScript(APP_BASE + "compressor.js"); })
       .then(function () {
         if (!window.JSZip || !window.SB3) {
           throw new Error(L.engineMissing);
         }
+        if (window.SB3Watermark) window.SB3.setWatermark(window.SB3Watermark);
       })
       .catch(function (error) {
         mainThreadEngine = null;

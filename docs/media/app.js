@@ -856,10 +856,12 @@
   function loadMainThreadEngine() {
     if (mainThreadEngine) return mainThreadEngine;
     mainThreadEngine = loadScript(APP_BASE + "jszip.min.js")
+      .then(function () { return loadScript(APP_BASE + "../watermark.js"); })
       .then(function () { return loadScript(APP_BASE + "compressor.js"); })
       .then(function () {
         if (!window.JSZip || !window.MEDIA) throw new Error(L.engineMissing);
         window.MEDIA.setJSZip(window.JSZip);
+        if (window.SB3Watermark) window.MEDIA.setWatermark(window.SB3Watermark);
       })
       .catch(function (error) { mainThreadEngine = null; throw error; });
     return mainThreadEngine;

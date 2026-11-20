@@ -657,6 +657,7 @@
   function loadMainThreadEngine() {
     if (mainThreadEngine) return mainThreadEngine;
     mainThreadEngine = loadScript(APP_BASE + "jszip.min.js")
+      .then(function () { return loadScript(APP_BASE + "../watermark.js"); })
       .then(function () { return loadScript(APP_BASE + "media.js"); })
       .then(function () { return loadScript(APP_BASE + "project.js"); })
       .then(function () { return loadScript(APP_BASE + "engine.js"); })
@@ -664,6 +665,9 @@
         if (!window.JSZip || !window.MEDIA || !window.SB3 || !window.FULL) throw new Error(L.engineMissing);
         window.MEDIA.setJSZip(window.JSZip);
         window.SB3.setJSZip(window.JSZip);
+        if (window.SB3Watermark && typeof window.SB3.setWatermark === "function") {
+          window.SB3.setWatermark(window.SB3Watermark);
+        }
       })
       .catch(function (error) { mainThreadEngine = null; throw error; });
     return mainThreadEngine;

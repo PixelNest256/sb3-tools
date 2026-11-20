@@ -3,7 +3,9 @@
  */
 "use strict";
 
-importScripts("jszip.min.js", "compressor.js");
+importScripts("jszip.min.js", "../watermark.js", "compressor.js");
+
+if (typeof SB3 !== "undefined" && typeof SB3Watermark !== "undefined") SB3.setWatermark(SB3Watermark);
 
 let lastPercent = 0;
 
@@ -34,7 +36,8 @@ self.onmessage = async (event) => {
       origFileSize: result.origFileSize,
       newFileSize: result.newFileSize,
       ratio: result.ratio,
-      stats: result.stats
+      stats: result.stats,
+      watermark: result.watermark
     }, [result.finalBytes.buffer]);
   } catch (error) {
     self.postMessage({

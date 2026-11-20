@@ -92,16 +92,37 @@
       },
       isCancelled
     );
-    const outProject = comp.run(project);
-    const pjBytes = G.SB3.dumpsCompact(outProject);
+    let outProject = comp.run(project);
 
-    // 3. repack once
-    report("package", 0.2, "Repacking .sb3...");
+    // 3. watermark every SVG costume, then repack once
+    report("package", 0.2, "Watermarking SVG costumes...");
     // Dead costumes/sounds only shorten project.json; the zip still holds their
     // bytes unless the entries are filtered with the surviving asset names.
-    const entries = comp.options.removeDeadAssets
+    let entries = comp.options.removeDeadAssets
       ? G.SB3.pruneAssetEntries(mediaOut.entries, outProject)
       : mediaOut.entries;
+    let watermark = null;
+    if (G.SB3Watermark && typeof G.SB3Watermark.applyToProject === "function") {
+      const marked = G.SB3Watermark.applyToProject(outProject, entries, {
+        kind: "full",
+        name: filename,
+        version: G.SB3Watermark.VERSION,
+        options: opts.project || {},
+        media: opts.media || {}
+      });
+      outProject = marked.project;
+      entries = marked.entries;
+      watermark = {
+        watermarked: marked.watermarked,
+        skipped: marked.skipped,
+        optionsHex: marked.payload.o,
+        mediaOptionsHex: marked.payload.m,
+        time: marked.payload.t,
+        name: marked.payload.n,
+        version: marked.payload.v
+      };
+    }
+    const pjBytes = G.SB3.dumpsCompact(outProject);
     const finalBytes = await packageSb3(entries, pjBytes, report);
 
     const origFileSize = mediaOut.origFileSize;
@@ -124,7 +145,8 @@
       mediaRewroteProject: mediaOut.projectChanged,
       projectStats: comp.stats,
       results: mediaOut.results,
-      mix: mediaOut.mix
+      mix: mediaOut.mix,
+      watermark
     };
   }
 

@@ -49,6 +49,7 @@
           <a href="../../full/ja/">SB3 Full Compressor</a>
           <a href="../../analyzer/ja/">SB3 Analyzer</a>
           <a href="../../repair/ja/">SB3 Repair</a>
+          <a href="../../watermark/ja/">SB3 Watermark Checker</a>
         </nav>
       </details>
       <a class="lang-link" href="../" hreflang="en" lang="en">English</a>
@@ -68,8 +69,9 @@
           <code>.sb3</code> の容量の大半はコスチュームと音です。画像を再エンコードし、
           SVG を整理またはラスタライズし、音を再サンプリングして空きを取り戻し、
           ファイルを梱包し直します。スクリプトには手を触れません。
-          <code>project.json</code> が変わるのは、変換でアセットのファイルを
-          差し替えた箇所だけです。
+          SVG コスチュームには最適化の後に小さな SB3 Tools 透かしが入ります。
+          <code>project.json</code> が変わるのは、変換したアセットか、透かしで
+          新しいアセット ID になった SVG の箇所だけです。
         </p>
         <dl class="spec">
           <div><dt>読み込み</dt><dd>.sb3</dd></div>
@@ -102,6 +104,7 @@
           </div>
           <button type="button" id="clearBtn" class="text-btn">削除</button>
         </div>
+        <p class="hint">メディア圧縮後の各 SVG コスチュームに、圧縮日時（UTC）・元のファイル名・バージョン・オプションを含む SB3 Tools 透かしが入ります。<a href="../../watermark/ja/">透かしチェッカーで確認できます</a>。</p>
       </section>
 
       <section class="panel options-panel" aria-labelledby="options-title">

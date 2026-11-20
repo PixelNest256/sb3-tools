@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>SB3 Tools — browser utilities for Scratch projects</title>
-<meta name="description" content="Five browser tools for Scratch and TurboWarp .sb3 files: a project.json compressor, a costume/sound media compressor, a combined compressor, an analyzer, and a validator/repair tool. Nothing is uploaded.">
+<meta name="description" content="Six browser tools for Scratch and TurboWarp .sb3 files: a project.json compressor, a costume/sound media compressor, a combined compressor, an analyzer, a validator/repair tool, and a watermark checker. Nothing is uploaded.">
 <meta name="theme-color" content="#e7e8e1">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' fill='%23171a16'/%3E%3Crect x='6' y='7' width='20' height='6' fill='%23e7e8e1'/%3E%3Crect x='6' y='16' width='11' height='9' fill='%23e14b12'/%3E%3Crect x='19' y='16' width='7' height='9' fill='%23565a4e'/%3E%3C/svg%3E">
 <script>
@@ -46,10 +46,10 @@
       <p class="eyebrow">Browser tools for Scratch and TurboWarp files</p>
       <h1>Compress them, inspect them,<br>or put them back together.</h1>
       <p class="lead">
-        Five tools for <code>.sb3</code> files. Three compress — the
+        Six tools for <code>.sb3</code> files. Three compress — the
         <code>project.json</code> logic, the costumes and sounds, or both at
-        once — one reports where the bytes and blocks go, and one validates and
-        repairs a damaged file. All run entirely in your browser — no upload, no
+        once — one reports where the bytes and blocks go, one validates and
+        repairs a damaged file, and one reads the watermark the compressors add. All run entirely in your browser — no upload, no
         install.
       </p>
     </section>
@@ -85,7 +85,8 @@
         <p class="body">
           Renames IDs, drops unused variables and unreachable code, and shares
           repeated blocks, then minifies <code>project.json</code> and repacks
-          the zip. Costumes and sounds are copied through unchanged.
+          the zip. SVG costumes receive a small watermark; other media is
+          copied through unchanged.
         </p>
         <dl class="spec">
           <div><dt>Reads</dt><dd>.sb3 / project.json</dd></div>
@@ -159,6 +160,28 @@
         <div class="actions">
           <a class="btn" href="repair/">Open the tool</a>
           <a class="btn-quiet" href="repair/ja/">日本語</a>
+        </div>
+      </section>
+
+      <section class="card card-wide" aria-labelledby="card-watermark">
+        <div class="card-head">
+          <span class="card-glyph" aria-hidden="true">WM</span>
+          <h2 id="card-watermark">SB3 Watermark Checker</h2>
+        </div>
+        <p class="card-sub">Provenance · read the mark</p>
+        <p class="body">
+          Reads the SB3 Tools watermark from every SVG costume: the UTC
+          compression time, the original project name, the tool version, and
+          the exact option flags used. It reports missing, invalid or mixed
+          watermarks without changing the project.
+        </p>
+        <dl class="spec">
+          <div><dt>Reads</dt><dd>.sb3</dd></div>
+          <div><dt>Writes</dt><dd>JSON report</dd></div>
+        </dl>
+        <div class="actions">
+          <a class="btn" href="watermark/">Open the tool</a>
+          <a class="btn-quiet" href="watermark/ja/">日本語</a>
         </div>
       </section>
     </div>

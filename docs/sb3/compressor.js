@@ -10,6 +10,8 @@
 })(typeof self !== "undefined" ? self : globalThis, function () {
   "use strict";
 
+  let watermarkApi = null;
+
   const CLOUD_PREFIX = "\u2601";
   const ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
 
@@ -271,6 +273,10 @@
       n /= 1024;
     }
     return `${groupDigits(n.toFixed(1))} GB`;
+  }
+
+  function setWatermark(api) {
+    watermarkApi = api && typeof api.applyToProject === "function" ? api : null;
   }
 
   // ------------------------------------------------------------------
@@ -5960,14 +5966,41 @@
     const report = typeof progress === "function" ? progress : () => {};
     const loaded = await loadInput(buffer, filename, report);
     const comp = new Compressor(options, report);
-    const project = comp.run(loaded.project);
+    let project = comp.run(loaded.project);
+    let entries = loaded.entries;
+    let watermark = null;
+
+    if (loaded.container === "sb3") {
+      // Filter dead assets before watermarking so a removed SVG cannot be
+      // re-added to the archive.
+      if (comp.options.removeDeadAssets) entries = pruneAssetEntries(entries, project);
+      if (watermarkApi && typeof watermarkApi.applyToProject === "function") {
+        const marked = watermarkApi.applyToProject(project, entries, {
+          kind: "project",
+          name: filename,
+          version: watermarkApi.VERSION,
+          options: comp.options
+        });
+        project = marked.project;
+        entries = marked.entries;
+        watermark = {
+          watermarked: marked.watermarked,
+          skipped: marked.skipped,
+          optionsHex: marked.payload.o,
+          time: marked.payload.t,
+          name: marked.payload.n,
+          version: marked.payload.v
+        };
+        comp.stats.watermark_svgs = marked.watermarked;
+        comp.stats.watermark_skipped = marked.skipped;
+      }
+    }
+
     report("serialize", 0.5, "Serializing JSON...");
     const outBytes = dumpsCompact(project);
     report("serialize", 1.0, `JSON serialized (${humanSize(outBytes.length)})`);
     const finalBytes = loaded.container === "sb3"
-      ? await packageSb3(
-        comp.options.removeDeadAssets ? pruneAssetEntries(loaded.entries, project) : loaded.entries,
-        outBytes, report)
+      ? await packageSb3(entries, outBytes, report)
       : outBytes;
     const origJson = loaded.pjRaw.length;
     const newJson = outBytes.length;
@@ -5980,7 +6013,8 @@
       origFileSize: buffer.byteLength !== undefined ? buffer.byteLength : buffer.length,
       newFileSize: finalBytes.length,
       ratio: origJson ? (1 - newJson / origJson) * 100 : 0,
-      stats: comp.stats
+      stats: comp.stats,
+      watermark
     };
   }
 
@@ -6006,6 +6040,7 @@
     defaultOutputName,
     humanSize,
     progressPercent,
-    setJSZip
+    setJSZip,
+    setWatermark
   };
 });

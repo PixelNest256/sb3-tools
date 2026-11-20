@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>SB3 Tools — Scratch プロジェクト向けブラウザツール</title>
-<meta name="description" content="Scratch / TurboWarp の .sb3 向けブラウザツール。project.json 圧縮、メディア圧縮、統合圧縮、アナライザー、検証・修復の5つ。アップロードはありません。">
+<meta name="description" content="Scratch / TurboWarp の .sb3 向けブラウザツール。project.json 圧縮、メディア圧縮、統合圧縮、アナライザー、検証・修復、透かしチェッカーの6つ。アップロードはありません。">
 <meta name="theme-color" content="#e7e8e1">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' fill='%23171a16'/%3E%3Crect x='6' y='7' width='20' height='6' fill='%23e7e8e1'/%3E%3Crect x='6' y='16' width='11' height='9' fill='%23e14b12'/%3E%3Crect x='19' y='16' width='7' height='9' fill='%23565a4e'/%3E%3C/svg%3E">
 <script>
@@ -46,9 +46,10 @@
       <p class="eyebrow">Scratch / TurboWarp のプロジェクトファイル向け</p>
       <h1>圧縮するも、<br>中身を見るも、直すも。</h1>
       <p class="lead">
-        <code>.sb3</code> 向けの5つのツールです。3つは圧縮（
+        <code>.sb3</code> 向けの6つのツールです。3つは圧縮（
         <code>project.json</code> の論理／コスチュームと音／その両方を一度に）、
-        1つは容量とブロックの内訳を表示し、1つは壊れたファイルを検証・修復します。
+        1つは容量とブロックの内訳を表示し、1つは壊れたファイルを検証・修復し、
+        1つは圧縮ツールが入れた透かしを読み取ります。
         すべてブラウザ内で完結し、アップロードもインストールも要りません。
       </p>
     </section>
@@ -83,8 +84,8 @@
         <p class="card-sub">プロジェクトデータ · 動作はそのまま</p>
         <p class="body">
           ID を短縮し、未使用の変数や到達しないコードを削り、繰り返すブロックを
-          共有してから <code>project.json</code> を最小化します。コスチュームと音は
-          そのままコピーされます。
+          共有してから <code>project.json</code> を最小化します。SVG コスチュームには
+          小さな透かしが入り、それ以外のメディアはそのままコピーされます。
         </p>
         <dl class="spec">
           <div><dt>読み込み</dt><dd>.sb3 / project.json</dd></div>
@@ -157,6 +158,28 @@
         <div class="actions">
           <a class="btn" href="../repair/ja/">ツールを開く</a>
           <a class="btn-quiet" href="../repair/">English</a>
+        </div>
+      </section>
+
+      <section class="card card-wide" aria-labelledby="card-watermark">
+        <div class="card-head">
+          <span class="card-glyph" aria-hidden="true">WM</span>
+          <h2 id="card-watermark">SB3 Watermark Checker</h2>
+        </div>
+        <p class="card-sub">圧縮の記録 · 透かしを読む</p>
+        <p class="body">
+          すべての SVG コスチュームから SB3 Tools の透かしを読み取ります。
+          圧縮日時（UTC）、圧縮前のプロジェクト名、ツールのバージョン、
+          使用したオプションが分かります。プロジェクトは変更せず、
+          透かしの欠落・不正・混在を報告します。
+        </p>
+        <dl class="spec">
+          <div><dt>読み込み</dt><dd>.sb3</dd></div>
+          <div><dt>書き出し</dt><dd>JSON レポート</dd></div>
+        </dl>
+        <div class="actions">
+          <a class="btn" href="../watermark/ja/">ツールを開く</a>
+          <a class="btn-quiet" href="../watermark/">English</a>
         </div>
       </section>
     </div>
