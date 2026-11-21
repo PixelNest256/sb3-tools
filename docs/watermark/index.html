@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>SB3 Watermark Checker — read an SB3 Tools watermark</title>
-<meta name="description" content="Read the SB3 Tools watermark from every SVG costume in a Scratch or TurboWarp .sb3: compression time (UTC), original project name, tool version, and the exact compressor options used. Nothing is uploaded.">
+<meta name="description" content="Read the SB3 Tools watermark from every SVG costume in a Scratch or TurboWarp .sb3, or fetch a public Scratch project by ID: compression time (UTC), original project name, tool version, and compressor options. Nothing is uploaded.">
 <meta name="theme-color" content="#e7e8e1">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' fill='%23171a16'/%3E%3Cpath d='M8 9h16v4H8zm0 6h16v4H8zm0 6h10v4H8z' fill='%23e7e8e1'/%3E%3Crect x='22' y='20' width='4' height='8' fill='%23e14b12'/%3E%3C/svg%3E">
 <script>
@@ -66,7 +66,9 @@
         <p class="lead">
           Finds the SB3 Tools watermark in every SVG costume and reads back the
           UTC compression time, the original project name, the tool version and
-          the exact option flags used by the compressor. Nothing is uploaded.
+          the exact option flags used by the compressor. Open a local
+          <code>.sb3</code>, or enter a public Scratch project ID to fetch and
+          check it. Nothing from your computer is uploaded.
         </p>
         <p class="html-note">
           <strong>How it is stored.</strong>
@@ -80,7 +82,7 @@
       <section class="panel input-panel" aria-labelledby="input-title">
         <div class="panel-head">
           <h2 id="input-title">Input</h2>
-          <span class="panel-meta">.sb3</span>
+          <span class="panel-meta">.sb3 · ID</span>
         </div>
         <div id="dropzone" class="dropzone" role="button" tabindex="0"
              aria-describedby="drop-hint" aria-label="Choose an .sb3 file">
@@ -100,7 +102,18 @@
           </div>
           <button type="button" id="clearBtn" class="text-btn">Remove</button>
         </div>
-        <p class="hint">The checker reads the archive locally. SVG costumes are inspected without rendering them.</p>
+
+        <form id="idForm" class="id-fetch" autocomplete="off">
+          <label class="id-label" for="projectId">Scratch project ID or URL</label>
+          <div class="id-row">
+            <input id="projectId" type="text" inputmode="numeric" spellcheck="false"
+                   placeholder="123456789" aria-describedby="idHint">
+            <button id="fetchBtn" class="btn-line" type="submit">Fetch and check</button>
+          </div>
+          <p class="hint" id="idHint">Public Scratch projects only. The project file and SVG costumes are downloaded from Scratch; nothing is uploaded.</p>
+        </form>
+
+        <p class="hint">The checker reads a local archive without rendering its SVG costumes.</p>
       </section>
 
       <div id="report" hidden>
@@ -164,7 +177,7 @@
         </div>
 
         <div class="size-pair">
-          <div class="size-row"><span class="label">input</span><span class="value" id="fileValue">—</span></div>
+          <div class="size-row"><span class="label" id="fileLabel">input</span><span class="value" id="fileValue">—</span></div>
           <div class="size-row"><span class="label">SVG costumes</span><span class="value" id="costumeValue">—</span></div>
           <div class="size-row"><span class="label">SVG assets</span><span class="value" id="assetValue">—</span></div>
           <div class="size-row"><span class="label">records</span><span class="value" id="recordValue">—</span></div>

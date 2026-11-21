@@ -1907,3 +1907,39 @@ html[lang="ja"] .watermark-main h1 { font-size: clamp(2.1rem, 5vw, 3.6rem); }
   .wm-record-head { display: block; }
   .wm-record-head span { display: block; margin-top: 3px; text-align: left; }
 }
+
+/* ------------------------------------------------ Scratch project input */
+.id-fetch {
+  margin-top: 12px;
+  padding-top: 0;
+  border-top: 0;
+}
+.id-label {
+  display: block;
+  margin-bottom: 7px;
+  font-family: var(--mono);
+  font-size: 9px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink-soft);
+}
+.id-row { display: flex; gap: 8px; }
+.id-row input {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 9px 10px;
+  border: 1px solid var(--rule);
+  border-radius: 0;
+  background: var(--paper-2);
+  color: var(--ink);
+  font-family: var(--mono);
+  font-size: 12px;
+  line-height: 1.2;
+}
+.id-row input::placeholder { color: var(--ink-soft); opacity: 0.7; }
+.id-row input:focus-visible { outline: 2px solid var(--signal); outline-offset: 1px; }
+.id-row .btn-line { flex: 0 0 auto; }
+@media (max-width: 480px) {
+  .id-row { flex-direction: column; }
+  .id-row .btn-line { width: 100%; }
+}

@@ -170,13 +170,14 @@
         </div>
         <p class="card-sub">Provenance · read the mark</p>
         <p class="body">
-          Reads the SB3 Tools watermark from every SVG costume: the UTC
-          compression time, the original project name, the tool version, and
-          the exact option flags used. It reports missing, invalid or mixed
-          watermarks without changing the project.
+          Reads the SB3 Tools watermark from every SVG costume, either from a
+          local <code>.sb3</code> or a public Scratch project ID: the UTC
+          compression time, original project name, tool version, and exact
+          option flags. It reports missing, invalid or mixed watermarks without
+          changing the project.
         </p>
         <dl class="spec">
-          <div><dt>Reads</dt><dd>.sb3</dd></div>
+          <div><dt>Reads</dt><dd>.sb3 / Scratch ID</dd></div>
           <div><dt>Writes</dt><dd>JSON report</dd></div>
         </dl>
         <div class="actions">

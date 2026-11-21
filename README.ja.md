@@ -18,7 +18,7 @@
 | `/full/` | **SB3 Full Compressor** | 同じファイルに両方の処理を実行し、梱包は1回だけ行います。 |
 | `/analyzer/` | **SB3 Analyzer** | 容量とブロックがどこにあるかを表示し、Scratch の上限に対して警告します。何も書き出しません。 |
 | `/repair/` | **SB3 Repair** | プロジェクトを厳格に検証し、壊れた ZIP や `project.json` を復元します。ブロック参照・変数・アセット・モニターを修復し、読み込める `.sb3` を書き出します。 |
-| `/watermark/` | **SB3 Watermark Checker** | 各 SVG コスチュームの SB3 Tools 透かしから、圧縮日時（UTC）・元のプロジェクト名・ツールのバージョン・オプションを読み取ります。JSON レポートだけを書き出します。 |
+| `/watermark/` | **SB3 Watermark Checker** | ローカルの `.sb3` または公開 Scratch プロジェクト ID から、各 SVG コスチュームの SB3 Tools 透かし（圧縮日時 UTC・元のプロジェクト名・ツールのバージョン・オプション）を読み取ります。JSON レポートだけを書き出します。 |
 
 各ツールには英語ページと日本語ページ（`…/ja/`）があります。編集するときは
 `docs/sb3/`、`docs/media/`、`docs/full/`、`docs/analyzer/`、`docs/repair/`、
@@ -153,6 +153,12 @@ SVG のバイト列が変わると MD5 も変わるため、圧縮ツールは�
 （SVGO やベクターエディタなど）では XML コメントが消えることがあります。
 `/watermark/` のチェッカーは、プロジェクトを変更せずに、透かしあり・なし・
 不正・混在を報告します。
+
+チェッカーには公開 Scratch プロジェクトの ID または URL も入力できます。
+TurboWarp の公開 trampoline プロキシでプロジェクトトークンを取得し、
+`project.json` と参照されている SVG アセットを Scratch からダウンロードして、
+同じ検査を行います。非公開プロジェクトは対象外で、トークンは JSON レポートに
+含めません。
 
 ### Analyzer
 

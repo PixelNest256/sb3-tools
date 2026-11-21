@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>SB3 透かしチェッカー — SB3 Tools の透かしを読む</title>
-<meta name="description" content="Scratch / TurboWarp の .sb3 に含まれる SVG コスチュームから SB3 Tools の透かしを読み取り、圧縮日時（UTC）・圧縮前のプロジェクト名・ツールのバージョン・使用したオプションを表示します。アップロードはありません。">
+<meta name="description" content="Scratch / TurboWarp の .sb3、または公開 Scratch プロジェクト ID から SVG コスチュームの SB3 Tools 透かしを読み取り、圧縮日時（UTC）・圧縮前のプロジェクト名・ツールのバージョン・オプションを表示します。アップロードはありません。">
 <meta name="theme-color" content="#e7e8e1">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' fill='%23171a16'/%3E%3Cpath d='M8 9h16v4H8zm0 6h16v4H8zm0 6h10v4H8z' fill='%23e7e8e1'/%3E%3Crect x='22' y='20' width='4' height='8' fill='%23e14b12'/%3E%3C/svg%3E">
 <script>
@@ -66,7 +66,8 @@
         <p class="lead">
           すべての SVG コスチュームから SB3 Tools の透かしを見つけ、圧縮日時（UTC）、
           圧縮前のプロジェクト名、ツールのバージョン、使用したオプションを読み取ります。
-          アップロードはありません。
+          ローカルの <code>.sb3</code> を開くか、公開 Scratch プロジェクトの ID を
+          入力して取得できます。手元のファイルはアップロードされません。
         </p>
         <p class="html-note">
           <strong>保存方法。</strong>
@@ -79,7 +80,7 @@
       <section class="panel input-panel" aria-labelledby="input-title">
         <div class="panel-head">
           <h2 id="input-title">入力</h2>
-          <span class="panel-meta">.sb3</span>
+          <span class="panel-meta">.sb3 · ID</span>
         </div>
         <div id="dropzone" class="dropzone" role="button" tabindex="0"
              aria-describedby="drop-hint" aria-label=".sb3 を選ぶ">
@@ -99,7 +100,18 @@
           </div>
           <button type="button" id="clearBtn" class="text-btn">削除</button>
         </div>
-        <p class="hint">チェッカーはアーカイブをローカルで読み取ります。SVG は描画せずに調べます。</p>
+
+        <form id="idForm" class="id-fetch" autocomplete="off">
+          <label class="id-label" for="projectId">Scratch プロジェクト ID または URL</label>
+          <div class="id-row">
+            <input id="projectId" type="text" inputmode="numeric" spellcheck="false"
+                   placeholder="123456789" aria-describedby="idHint">
+            <button id="fetchBtn" class="btn-line" type="submit">取得して確認</button>
+          </div>
+          <p class="hint" id="idHint">公開 Scratch プロジェクトのみ対応します。プロジェクトファイルと SVG コスチュームを Scratch からダウンロードします。アップロードはありません。</p>
+        </form>
+
+        <p class="hint">ローカルのアーカイブは、SVG を描画せずに読み取ります。</p>
       </section>
 
       <div id="report" hidden>
@@ -163,7 +175,7 @@
         </div>
 
         <div class="size-pair">
-          <div class="size-row"><span class="label">入力</span><span class="value" id="fileValue">—</span></div>
+          <div class="size-row"><span class="label" id="fileLabel">入力</span><span class="value" id="fileValue">—</span></div>
           <div class="size-row"><span class="label">SVG コスチューム</span><span class="value" id="costumeValue">—</span></div>
           <div class="size-row"><span class="label">SVG アセット</span><span class="value" id="assetValue">—</span></div>
           <div class="size-row"><span class="label">レコード</span><span class="value" id="recordValue">—</span></div>

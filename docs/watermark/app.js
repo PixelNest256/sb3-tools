@@ -19,6 +19,25 @@
       engineMissing: "The watermark engine did not load. Reload the page and try again.",
       noProject: "project.json was not found inside the archive.",
       badProject: "Could not parse project.json: {error}",
+      // Scratch project fetch
+      fetchingMeta: "Looking up project #{id}…",
+      fetchingProject: "Downloading project.json…",
+      fetchingAssets: "Downloading SVG assets ({done}/{total})…",
+      fetchInvalidId: "Enter a Scratch project ID (digits) or a project URL.",
+      fetchNoToken: "Scratch did not return a project token. The project may be unshared.",
+      fetchNotFound: "Scratch project #{id} was not found or is not shared.",
+      fetchStatus: "Could not fetch {what} (HTTP {status}).",
+      fetchFailed: "Could not fetch {what}: {error}",
+      fetchEmptyProject: "The Scratch project data was empty.",
+      missingTargets: "missing targets",
+      fetchAssetMissing: "Could not download SVG asset {name}.",
+      assetMissing: "The SVG asset is missing from the input.",
+      metaResource: "project information",
+      projectResource: "project.json",
+      assetResource: "SVG assets",
+      remoteSource: "Scratch project #{id}",
+      localSource: "local file",
+      downloaded: "downloaded",
       // summary
       file: "file",
       projectJson: "project.json",
@@ -110,6 +129,25 @@
       engineMissing: "透かしエンジンが読み込まれませんでした。ページを再読み込みしてください。",
       noProject: "アーカイブ内に project.json が見つかりません。",
       badProject: "project.json を解析できませんでした: {error}",
+      // Scratch プロジェクトの取得
+      fetchingMeta: "プロジェクト #{id} を照会しています…",
+      fetchingProject: "project.json をダウンロードしています…",
+      fetchingAssets: "SVG アセットをダウンロードしています（{done}/{total}）…",
+      fetchInvalidId: "Scratch のプロジェクト ID（数字）またはプロジェクト URL を入力してください。",
+      fetchNoToken: "Scratch からプロジェクトトークンが返りませんでした。非公開プロジェクトの可能性があります。",
+      fetchNotFound: "Scratch プロジェクト #{id} が見つからないか、共有されていません。",
+      fetchStatus: "{what} を取得できませんでした（HTTP {status}）。",
+      fetchFailed: "{what} を取得できませんでした: {error}",
+      fetchEmptyProject: "Scratch のプロジェクトデータが空です。",
+      missingTargets: "targets がありません",
+      fetchAssetMissing: "SVG アセット {name} をダウンロードできませんでした。",
+      assetMissing: "入力に SVG アセットが見つかりません。",
+      metaResource: "プロジェクト情報",
+      projectResource: "project.json",
+      assetResource: "SVG アセット",
+      remoteSource: "Scratch プロジェクト #{id}",
+      localSource: "ローカルファイル",
+      downloaded: "取得量",
       file: "ファイル",
       projectJson: "project.json",
       svgCostumes: "SVG コスチューム",
@@ -367,17 +405,25 @@
     };
   }
 
-  function scanProject(project, zip) {
-    var entries = [];
-    var assetData = new Map();
-    Object.keys(zip.files).forEach(function (name) {
-      var entry = zip.files[name];
-      if (entry.dir || /(^|\/)project\.json$/i.test(name)) return;
-      if (/\.svg$/i.test(name)) {
-        entries.push({ name: name, zipEntry: entry });
-      }
-    });
+  // Run an async worker over an array with a bounded number in flight.
+  function eachLimit(items, limit, worker) {
+    var next = 0;
+    var runners = [];
+    var count = Math.min(limit, items.length);
+    for (var i = 0; i < count; i++) {
+      runners.push((async function () {
+        while (true) {
+          var index = next++;
+          if (index >= items.length) return;
+          await worker(items[index], index);
+        }
+      })());
+    }
+    return Promise.all(runners);
+  }
 
+  function scanProject(project, entries, readEntry) {
+    var assetData = new Map();
     var byName = new Map();
     entries.forEach(function (entry) { byName.set(entry.name.toLowerCase(), entry); });
     function find(name) {
@@ -423,7 +469,7 @@
         costumeCount += 1;
         var expected = entryNameForCostume(costume);
         var entry = find(expected);
-        var row = entry ? rowFor(entry, true) : rowFor({ name: expected }, true);
+        var row = entry ? rowFor(entry, true) : rowFor({ name: expected, missing: true }, true);
         row.assetId = String(costume.assetId || row.assetId || "");
         if (row.costumes.indexOf(String(costume.name || "")) < 0) {
           row.costumes.push(String(costume.name || ""));
@@ -437,20 +483,28 @@
       if (!rows.has(entry.name)) rowFor(entry, false);
     });
 
-    return {
+    var scan = {
       entries: entries,
       rows: rowsOrder,
       svgCostumes: costumeCount,
+      assetBytes: 0,
       load: function (onDone) {
-        var pending = rowsOrder.map(function (row) {
-          if (!row.entry || !row.entry.zipEntry) return Promise.resolve();
-          return row.entry.zipEntry.async("uint8array").then(function (bytes) {
+        eachLimit(rowsOrder, ASSET_CONCURRENCY, function (row) {
+          if (!row.entry) return Promise.resolve();
+          if (row.entry.missing) {
+            row.error = L.assetMissing;
+            return Promise.resolve();
+          }
+          return Promise.resolve().then(function () {
+            return readEntry(row.entry);
+          }).then(function (bytes) {
+            if (!bytes) throw new Error(L.assetMissing);
             assetData.set(row.file, bytes);
+            scan.assetBytes += bytes.byteLength;
           }).catch(function (error) {
             row.error = String(error && error.message || error);
           });
-        });
-        Promise.all(pending).then(function () {
+        }).then(function () {
           rowsOrder.forEach(function (row) {
             if (row.error || !assetData.has(row.file)) return;
             var bytes = assetData.get(row.file);
@@ -468,6 +522,7 @@
         });
       }
     };
+    return scan;
   }
 
   function flagSummary(record) {
@@ -517,6 +572,11 @@
     var referencedRows = rows.filter(function (row) { return row.referenced; });
 
     var summary = [
+      [L.source, report.source
+        ? (report.source.type === "scratch"
+          ? fmt(L.remoteSource, { id: report.source.id })
+          : L.localSource)
+        : L.localSource],
       [L.svgCostumes, report.svgCostumes],
       [L.svgAssets, rows.length],
       [L.markedAssets, markedAssets],
@@ -547,9 +607,15 @@
       note = L.noteNoSvg;
       tag = "NO SVG";
     } else if (!records.length) {
-      status = L.statusNone;
-      note = L.noteNone;
-      tag = "NONE";
+      if (invalidAssets) {
+        status = L.statusInvalid;
+        note = L.noteReadError;
+        tag = "ERROR";
+      } else {
+        status = L.statusNone;
+        note = L.noteNone;
+        tag = "NONE";
+      }
     } else if (invalidRecords.length && !validRecords.length) {
       status = L.statusInvalid;
       note = L.noteInvalid;
@@ -719,6 +785,11 @@
       }).join("");
     }
 
+    var fileLabel = $("fileLabel");
+    if (fileLabel) {
+      fileLabel.textContent = report.source && report.source.type === "scratch"
+        ? L.downloaded : L.file;
+    }
     $("fileValue").textContent = humanSize(report.fileSize);
     $("copyBtn").disabled = false;
     $("downloadReport").hidden = false;
@@ -760,14 +831,166 @@
       throw new Error(fmt(L.badProject, { error: error.message || error }));
     }
     setPhase(L.scanning);
-    var scan = scanProject(project, zip);
+    var entries = [];
+    Object.keys(zip.files).forEach(function (name) {
+      var entry = zip.files[name];
+      if (entry.dir || /(^|\/)project\.json$/i.test(name)) return;
+      if (/\.svg$/i.test(name)) entries.push({ name: name, zipEntry: entry });
+    });
+    var scan = scanProject(project, entries, function (entry) {
+      return entry.zipEntry.async("uint8array");
+    });
     await new Promise(function (resolve) { scan.load(resolve); });
     render({
       file: file.name,
       fileSize: buffer.byteLength,
       projectJsonSize: new TextEncoder().encode(projectText).length,
       svgCostumes: scan.svgCostumes,
-      rows: scan.rows
+      rows: scan.rows,
+      source: { type: "file", name: file.name }
+    });
+  }
+
+  // ------------------------------------------------- Scratch project fetch
+
+  var SCRATCH_META = [
+    "https://trampoline.turbowarp.org/api/projects/",
+    "https://trampoline.turbowarp.xyz/api/projects/"
+  ];
+  var SCRATCH_PROJECT = "https://projects.scratch.mit.edu/";
+  var SCRATCH_ASSET = "https://assets.scratch.mit.edu/internalapi/asset/";
+  var FETCH_TIMEOUT = 20000;
+  var ASSET_CONCURRENCY = 6;
+
+  function parseProjectId(value) {
+    var text = String(value || "").trim();
+    if (/^\d{1,20}$/.test(text)) return text;
+    var match = text.match(/(?:scratch\.mit\.edu|turbowarp\.org)\/(?:projects\/)?(\d{1,20})/i);
+    return match ? match[1] : "";
+  }
+
+  function request(url, what, responseType) {
+    var controller = typeof AbortController !== "undefined" ? new AbortController() : null;
+    var timer = controller ? setTimeout(function () { controller.abort(); }, FETCH_TIMEOUT) : null;
+    var options = { cache: "no-store" };
+    if (controller) options.signal = controller.signal;
+    return fetch(url, options).then(function (response) {
+      if (timer) clearTimeout(timer);
+      if (!response.ok) {
+        var statusError = new Error(fmt(L.fetchStatus, {
+          what: what, status: response.status
+        }));
+        statusError.status = response.status;
+        throw statusError;
+      }
+      return responseType === "text" ? response.text() : response.arrayBuffer();
+    }, function (error) {
+      if (timer) clearTimeout(timer);
+      throw new Error(fmt(L.fetchFailed, {
+        what: what, error: String(error && error.message || error)
+      }));
+    });
+  }
+
+  async function fetchScratchMeta(id) {
+    var lastError = null;
+    for (var i = 0; i < SCRATCH_META.length; i++) {
+      try {
+        return JSON.parse(await request(
+          SCRATCH_META[i] + encodeURIComponent(id), L.metaResource, "text"
+        ));
+      } catch (error) {
+        lastError = error;
+      }
+    }
+    throw lastError || new Error(fmt(L.fetchNotFound, { id: id }));
+  }
+
+  function remoteEntries(project) {
+    var found = new Map();
+    var targets = Array.isArray(project.targets) ? project.targets : [];
+    targets.forEach(function (target) {
+      if (!target || !Array.isArray(target.costumes)) return;
+      target.costumes.forEach(function (costume) {
+        if (!costume || String(costume.dataFormat || "").toLowerCase() !== "svg") return;
+        var name = entryNameForCostume(costume);
+        if (name && !found.has(name.toLowerCase())) {
+          found.set(name.toLowerCase(), { name: name, remote: true });
+        }
+      });
+    });
+    return Array.from(found.values());
+  }
+
+  async function analyzeProjectId(value) {
+    var id = parseProjectId(value);
+    if (!id) throw new Error(L.fetchInvalidId);
+    setPhase(fmt(L.fetchingMeta, { id: id }));
+    var meta;
+    try {
+      meta = await fetchScratchMeta(id);
+    } catch (error) {
+      if (error && error.status === 404) {
+        throw new Error(fmt(L.fetchNotFound, { id: id }));
+      }
+      throw error;
+    }
+    if (!meta || !meta.project_token) {
+      if (meta && (meta.id || meta.title)) throw new Error(fmt(L.fetchNoToken, { id: id }));
+      throw new Error(fmt(L.fetchNotFound, { id: id }));
+    }
+    $("fileName").textContent = String(meta.title || fmt(L.remoteSource, { id: id }));
+    $("fileSize").textContent = "#" + id;
+
+    setPhase(fmt(L.fetchingProject, { id: id }));
+    var projectText = await request(
+      SCRATCH_PROJECT + encodeURIComponent(id) + "?token=" + encodeURIComponent(meta.project_token),
+      L.projectResource,
+      "text"
+    );
+    if (!projectText) throw new Error(L.fetchEmptyProject);
+    var project;
+    try {
+      project = JSON.parse(projectText);
+    } catch (error) {
+      throw new Error(fmt(L.badProject, { error: error.message || error }));
+    }
+    if (!project || !Array.isArray(project.targets)) {
+      throw new Error(fmt(L.badProject, { error: L.missingTargets }));
+    }
+
+    var entries = remoteEntries(project);
+    var done = 0;
+    setPhase(fmt(L.fetchingAssets, { done: 0, total: entries.length }));
+    var scan = scanProject(project, entries, async function (entry) {
+      var buffer = await request(
+        SCRATCH_ASSET + encodeURIComponent(entry.name) + "/get/",
+        L.assetResource
+      );
+      done += 1;
+      setPhase(fmt(L.fetchingAssets, { done: done, total: entries.length }));
+      return new Uint8Array(buffer);
+    });
+    await new Promise(function (resolve) { scan.load(resolve); });
+    var failed = scan.rows.filter(function (row) { return row.error; });
+    if (failed.length) {
+      throw new Error(failed[0].error || fmt(L.fetchAssetMissing, {
+        name: failed[0].file || L.unknown
+      }));
+    }
+    var projectJsonSize = new TextEncoder().encode(projectText).length;
+    render({
+      file: "scratch-" + id + ".sb3",
+      fileSize: projectJsonSize + scan.assetBytes,
+      projectJsonSize: projectJsonSize,
+      svgCostumes: scan.svgCostumes,
+      rows: scan.rows,
+      source: {
+        type: "scratch",
+        id: Number(id),
+        title: String(meta.title || ""),
+        url: "https://scratch.mit.edu/projects/" + id + "/"
+      }
     });
   }
 
@@ -779,6 +1002,7 @@
       schema: WM.SCHEMA,
       analyzedAt: new Date().toISOString(),
       file: report.file,
+      source: report.source || null,
       summary: {
         svgCostumes: report.svgCostumes,
         svgAssets: report.rows.length,
@@ -811,11 +1035,40 @@
     };
   }
 
+  function fetchProjectId(value) {
+    if ($("fetchBtn").disabled) return;
+    var id = parseProjectId(value);
+    if (!id) {
+      $("report").hidden = true;
+      $("copyBtn").disabled = true;
+      $("downloadReport").hidden = true;
+      showError(L.fetchInvalidId);
+      return;
+    }
+    setFile(null);
+    $("fileName").textContent = fmt(L.remoteSource, { id: id });
+    $("fileSize").textContent = "";
+    $("fileRow").hidden = false;
+    $("fetchBtn").disabled = true;
+    setPhase(fmt(L.fetchingMeta, { id: id }));
+    analyzeProjectId(value).then(function () {
+      $("fetchBtn").disabled = false;
+    }).catch(function (error) {
+      $("report").hidden = true;
+      $("copyBtn").disabled = true;
+      $("downloadReport").hidden = true;
+      setStatus(L.statusReadError, String(error && error.message || error), "ERROR");
+      setPhase(L.failed);
+      $("fetchBtn").disabled = false;
+    });
+  }
+
   function setFile(file) {
     if (!file) {
       $("fileRow").hidden = true;
       $("fileName").textContent = "project.sb3";
       $("fileSize").textContent = "—";
+      if ($("fileLabel")) $("fileLabel").textContent = L.file;
       $("fileValue").textContent = "—";
       $("report").hidden = true;
       $("statusValue").textContent = "—";
@@ -833,6 +1086,7 @@
     }
     $("fileName").textContent = file.name;
     $("fileSize").textContent = humanSize(file.size);
+    if ($("fileLabel")) $("fileLabel").textContent = L.file;
     $("fileValue").textContent = humanSize(file.size);
     $("fileRow").hidden = false;
     $("report").hidden = true;
@@ -887,6 +1141,14 @@
     setFile(file);
   });
   $("clearBtn").addEventListener("click", function () { setFile(null); input.value = ""; });
+
+  var idForm = $("idForm");
+  if (idForm) {
+    idForm.addEventListener("submit", function (event) {
+      event.preventDefault();
+      fetchProjectId($("projectId").value);
+    });
+  }
 
   $("copyBtn").addEventListener("click", function () {
     var report = buildJsonReport();

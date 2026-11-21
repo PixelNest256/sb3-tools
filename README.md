@@ -19,7 +19,7 @@ itself.
 | `/full/` | **SB3 Full Compressor** | Runs both passes on one file and repacks once. |
 | `/analyzer/` | **SB3 Analyzer** | Reports where the bytes and blocks go, with warnings against Scratch's upload limits. Writes nothing. |
 | `/repair/` | **SB3 Repair** | Strictly validates a project, salvages a broken ZIP or `project.json`, repairs block links, stores, assets and monitors, then writes a loadable `.sb3`. |
-| `/watermark/` | **SB3 Watermark Checker** | Reads the SB3 Tools watermark from every SVG costume: UTC compression time, original project name, tool version, and option flags. Writes only a JSON report. |
+| `/watermark/` | **SB3 Watermark Checker** | Reads the SB3 Tools watermark from every SVG costume in a local `.sb3` or a public Scratch project ID: UTC compression time, original project name, tool version, and option flags. Writes only a JSON report. |
 
 Each tool has an English page and a Japanese page (`…/ja/`). Use `docs/sb3/`,
 `docs/media/`, `docs/full/`, `docs/analyzer/`, `docs/repair/`, and
@@ -157,6 +157,12 @@ The watermark survives a normal Scratch / TurboWarp save, but a tool that
 rewrites the SVG itself (for example SVGO or a vector editor) may remove an XML
 comment. The `/watermark/` checker reports marked, unmarked, invalid, and mixed
 payloads without modifying the project.
+
+The checker also accepts a public Scratch project ID or URL. It resolves the
+project token through TurboWarp's public trampoline proxy, downloads
+`project.json` and the referenced SVG assets from Scratch, and runs the same
+scan. Unshared projects are rejected; the project token is never written to the
+JSON report.
 
 ### Analyzer
 
