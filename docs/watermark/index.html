@@ -72,10 +72,11 @@
         </p>
         <p class="html-note">
           <strong>How it is stored.</strong>
-          The watermark is an XML comment in each SVG costume. It is ignored by
-          Scratch and TurboWarp during normal project saves, and the asset's
-          MD5 stays consistent with its bytes. A tool that rewrites or
-          optimises the SVG itself may remove it.
+          The watermark is an invisible <code>&lt;desc&gt;</code> element in each
+          SVG costume. It has no geometry, so Scratch and TurboWarp never draw
+          it, and it survives Scratch's SVG sanitizer and normal project saves.
+          The asset's MD5 stays consistent with its bytes. A tool that rewrites
+          the SVG with an aggressive custom optimiser may still remove it.
         </p>
       </section>
 

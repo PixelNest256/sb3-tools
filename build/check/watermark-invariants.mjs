@@ -152,7 +152,11 @@ function entriesFixture() {
       if (!entry) continue;
       const text = new TextDecoder().decode(entry.data);
       equal((text.match(/SB3TOOLS-WATERMARK/g) || []).length, 1,
-        `costume ${costume.name} has exactly one watermark comment`);
+        `costume ${costume.name} has exactly one watermark entry`);
+      check(text.includes('<desc id="sb3tools-watermark">'),
+        `costume ${costume.name} stores the watermark in a hidden <desc>`);
+      check(!text.includes("<!-- SB3TOOLS-WATERMARK"),
+        `costume ${costume.name} no longer uses an XML-comment watermark`);
       check(!text.includes("old.sb3"), `costume ${costume.name} replaced the old watermark`);
       equal(md5(entry.data), costume.assetId,
         `costume ${costume.name} assetId is the MD5 of its bytes`);
@@ -179,6 +183,34 @@ function entriesFixture() {
   check(selfMarked.indexOf("SB3TOOLS-WATERMARK") < selfMarked.indexOf("</svg>"),
     "self-closing SVG keeps the watermark inside the root element");
   equal(WM.parseSvg(selfMarked).length, 1, "self-closing SVG still parses one watermark");
+
+  // The <desc> must not become the first child: Scratch calls getBBox() on the
+  // first child when an SVG has no viewBox, and <desc> is not a graphics
+  // element.  Append it after the artwork instead.
+  const noViewBox = '<svg xmlns="http://www.w3.org/2000/svg"><rect width="4" height="3"/></svg>';
+  const noViewMarked = WM.applyToSvg(noViewBox, {
+    s: 1, k: "project", t: "2026-01-01T00:00:00Z", n: "a.sb3", v: "1.0.0", o: "00"
+  });
+  check(noViewMarked.indexOf("<rect") < noViewMarked.indexOf("<desc"),
+    "the hidden <desc> is appended after the first graphics element");
+  check(noViewMarked.indexOf("</desc>") < noViewMarked.indexOf("</svg>"),
+    "the hidden <desc> stays inside the SVG root");
+  equal(WM.parseSvg(svgAOld).length, 1, "legacy XML-comment watermarks are still readable");
+  equal(WM.parseSvg(svgAOld)[0].payload.n, "old.sb3",
+    "legacy XML-comment payloads decode normally");
+  const legacyStripped = WM.stripWatermarks(svgAOld);
+  check(!legacyStripped.includes("SB3TOOLS-WATERMARK") && legacyStripped.includes("<svg"),
+    "legacy XML-comment watermarks are removed completely");
+  check(!WM.stripWatermarks(selfMarked).includes("SB3TOOLS-WATERMARK"),
+    "the hidden <desc> watermark is removed completely");
+  const plainPayload = {
+    s: 1, k: "project", t: "2026-01-01T00:00:00Z", n: "a.sb3", v: "1.0.0", o: "00"
+  };
+  const plainMarked = WM.applyToSvg(SVG_A, plainPayload);
+  equal(WM.stripWatermarks(plainMarked), SVG_A,
+    "stripping the <desc> watermark restores the original SVG bytes");
+  equal(WM.applyToSvg(plainMarked, plainPayload), plainMarked,
+    "re-watermarking an unchanged SVG is byte-idempotent");
 
   // Same metadata: stripping and reinserting must be idempotent.
   const again = WM.applyToProject(marked.project, marked.entries, {

@@ -144,20 +144,25 @@ the report says what was dropped.
 
 All three compressors add a small watermark to every referenced SVG costume
 that survives their output. The full pass and the media pass apply it after
-SVGO, so the optimiser cannot strip it. It is an XML comment immediately after the root
-`<svg>` element, so Scratch and TurboWarp ignore it and a normal project save
-copies the asset through unchanged:
+SVGO, so the optimiser cannot strip it. It is an invisible `<desc>` element
+appended as the last child of the root `<svg>` element: it has no geometry, so
+Scratch and TurboWarp never paint it, and a normal project save copies the
+asset through unchanged:
 
 ```xml
-<!-- SB3TOOLS-WATERMARK:1:<base64(JSON)> -->
+<desc id="sb3tools-watermark">SB3TOOLS-WATERMARK:1:<base64(JSON)></desc>
 ```
 
-The payload is JSON with `s` (schema), `k` (`project`, `media`, or `full`),
-`t` (UTC timestamp), `n` (original file name), `v` (tool version), `o` (project
-option bits), and, for the media/full passes, `m` (media option bits). Option
-bits are packed least-significant-bit first in the fixed key order exported by
-`docs/watermark.js`; the project pass has 26 flags and the media/full passes
-add 7 media flags. The checker decodes both groups.
+`<desc>` is deliberately used instead of an XML comment or `<metadata>`: the
+Scratch SVG sanitizer removes comments, and `scratch-svg-renderer` empties the
+contents of `<metadata>` on load. A `<desc>` survives both paths and is also
+kept by SVGO's default configuration. The payload is JSON with `s` (schema),
+`k` (`project`, `media`, or `full`), `t` (UTC timestamp), `n` (original file
+name), `v` (tool version), `o` (project option bits), and, for the media/full
+passes, `m` (media option bits). Option bits are packed least-significant-bit
+first in the fixed key order exported by `docs/watermark.js`; the project pass
+has 26 flags and the media/full passes add 7 media flags. The checker decodes
+both groups.
 
 Changing the SVG bytes changes its MD5, so the compressor updates the
 `assetId`/`md5ext` of every costume that shared the old asset. An existing
@@ -166,10 +171,11 @@ idempotent when the metadata is the same and replaces a stale payload when it
 is not. The full and media passes apply the watermark after media compression, so
 SVGO cannot remove it in those passes.
 
-The watermark survives a normal Scratch / TurboWarp save, but a tool that
-rewrites the SVG itself (for example SVGO or a vector editor) may remove an XML
-comment. The `/watermark/` checker reports marked, unmarked, invalid, and mixed
-payloads without modifying the project.
+The watermark survives a normal Scratch / TurboWarp save. A tool that rewrites
+the SVG itself with an aggressive custom SVGO config could still remove a
+`<desc>`; the checker reports marked, unmarked, invalid, and mixed payloads
+without modifying the project. Older watermarks stored as XML comments are
+still readable, and are replaced by the `<desc>` form on the next compression.
 
 The checker also accepts a public Scratch project ID or URL. It resolves the
 project token through TurboWarp's public trampoline proxy, downloads

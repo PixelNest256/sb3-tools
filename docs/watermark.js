@@ -1,13 +1,18 @@
 /* SB3 Tools watermark.
  *
- * A watermark is a single XML comment inside each SVG costume:
+ * A watermark is a single hidden <desc> element inside each SVG costume:
  *
- *   <!-- SB3TOOLS-WATERMARK:1:<base64(JSON)> -->
+ *   <desc id="sb3tools-watermark">SB3TOOLS-WATERMARK:1:<base64(JSON)></desc>
  *
  * The payload carries the UTC compression time, the original file name, the
- * tool version, and a fixed-order bit field of the options.  XML comments are
- * ignored by Scratch and TurboWarp, and the raw SVG asset is copied through a
- * normal project save.
+ * tool version, and a fixed-order bit field of the options.  <desc> is a
+ * standard SVG description element: it has no geometry and is never painted,
+ * so it cannot change how the costume looks.  It survives Scratch's SVG
+ * sanitizer and Scratch / TurboWarp's SVG round trip, unlike XML comments
+ * (which the sanitizer removes) and <metadata> (whose contents are emptied).
+ *
+ * Older watermarks used an XML comment.  The reader still accepts them, and
+ * applying a new watermark removes them.
  *
  * All option keys are encoded least-significant-bit first: key 0 is bit 0 of
  * byte 0, key 7 is bit 7 of byte 0, key 8 is bit 0 of byte 1, and so on.
@@ -232,48 +237,86 @@
     return "<!-- " + MARKER + ":" + SCHEMA + ":" + encodePayload(payload) + " -->";
   }
 
-  function stripWatermarks(svgText) {
-    return String(svgText).replace(/<!--\s*SB3TOOLS-WATERMARK(?::[^]*?)?-->/gi, "");
+  function makeDesc(payload) {
+    return '<desc id="sb3tools-watermark">' + MARKER + ":" + SCHEMA + ":" +
+      encodePayload(payload) + "</desc>";
   }
 
-  function insertWatermark(svgText, comment) {
+  function stripWatermarks(svgText) {
+    return String(svgText)
+      // Legacy XML-comment watermarks.  Remove the surrounding indentation /
+      // one newline as well so re-watermarking does not accumulate whitespace.
+      .replace(/\r?\n?[ \t]*<!--\s*SB3TOOLS-WATERMARK(?::[\s\S]*?)?-->[ \t]*\r?\n?/gi, "")
+      // The current hidden <desc> marker.  Match either the marker text or
+      // our id so a partially edited element is still replaced cleanly.
+      .replace(/\r?\n?[ \t]*<desc\b[^>]*>[\s\S]*?SB3TOOLS-WATERMARK:[\s\S]*?<\/desc>[ \t]*\r?\n?/gi, "")
+      .replace(/\r?\n?[ \t]*<desc\b[^>]*\bid=["']sb3tools-watermark["'][^>]*>[\s\S]*?<\/desc>[ \t]*\r?\n?/gi, "");
+  }
+
+  function insertWatermark(svgText, marker) {
     const text = String(svgText);
     const root = /<svg\b[^>]*>/i.exec(text);
     if (!root) return null;
     const tag = root[0];
     const at = root.index + tag.length;
-    // A self-closing root would put the comment outside the SVG element,
-    // where Scratch's SVG loader may discard it. Turn it into a normal root
-    // and keep the watermark inside.
+    // A self-closing root has no closing tag and no children. Turn it into a
+    // normal root and keep the marker inside.
     if (/\/\s*>$/.test(tag)) {
       const open = tag.replace(/\/\s*>$/, ">");
-      return text.slice(0, root.index) + open + "\n  " + comment + "\n</svg>" + text.slice(at);
+      return text.slice(0, root.index) + open + "\n  " + marker + "\n</svg>" + text.slice(at);
     }
-    return text.slice(0, at) + "\n  " + comment + text.slice(at);
+    // Append as the LAST child. Scratch's SVG loader calls getBBox() on the
+    // first child when an SVG has no viewBox, and <desc> is not a graphics
+    // element (it has no getBBox). Keeping the description after the artwork
+    // avoids changing which element is measured.
+    const closeRe = /<\/svg\s*>/gi;
+    let close = null;
+    let match;
+    while ((match = closeRe.exec(text))) close = match;
+    if (!close) return text.slice(0, at) + "\n  " + marker + text.slice(at);
+    return text.slice(0, close.index) + "\n  " + marker + "\n" + text.slice(close.index);
   }
 
   function applyToSvg(svgText, payload) {
     const stripped = stripWatermarks(svgText);
-    return insertWatermark(stripped, makeComment(payload));
+    return insertWatermark(stripped, makeDesc(payload));
+  }
+
+  function readRecord(schema, raw, encoded) {
+    const payload = decodePayload(encoded);
+    return {
+      schema: Number(schema),
+      raw,
+      payload,
+      flags: payload ? decodeFlags(payload.o, PROJECT_OPTION_KEYS) : [],
+      mediaFlags: payload && (payload.k === "full" || payload.k === "media")
+        ? decodeFlags(payload.m, MEDIA_OPTION_KEYS)
+        : []
+    };
   }
 
   function parseSvg(svgText) {
     const text = String(svgText || "");
     const out = [];
-    const re = /<!--\s*SB3TOOLS-WATERMARK:(\d+):([A-Za-z0-9+/=]+)\s*-->/gi;
+
+    // Legacy XML-comment watermarks.
+    const commentRe = /<!--\s*SB3TOOLS-WATERMARK:(\d+):([A-Za-z0-9+/=]+)\s*-->/gi;
     let match;
-    while ((match = re.exec(text))) {
-      const payload = decodePayload(match[2]);
-      out.push({
-        schema: Number(match[1]),
-        raw: match[0],
-        payload,
-        flags: payload ? decodeFlags(payload.o, PROJECT_OPTION_KEYS) : [],
-        mediaFlags: payload && (payload.k === "full" || payload.k === "media")
-          ? decodeFlags(payload.m, MEDIA_OPTION_KEYS)
-          : []
-      });
+    while ((match = commentRe.exec(text))) {
+      out.push(readRecord(match[1], match[0], match[2]));
     }
+
+    // Current hidden <desc> watermarks.  The text content is authoritative;
+    // the id is only an aid when editing the SVG by hand.
+    const descRe = /<desc\b([^>]*)>([\s\S]*?)<\/desc>/gi;
+    while ((match = descRe.exec(text))) {
+      const attrs = match[1] || "";
+      const body = match[2] || "";
+      if (!/sb3tools-watermark/i.test(attrs) && !/SB3TOOLS-WATERMARK/i.test(body)) continue;
+      const token = /SB3TOOLS-WATERMARK:(\d+):([A-Za-z0-9+/=]+)/i.exec(body);
+      if (token) out.push(readRecord(token[1], match[0], token[2]));
+    }
+
     return out;
   }
 
@@ -309,7 +352,6 @@
     const source = isDict(project) ? project : {};
     const inputEntries = isArr(entries) ? entries.slice() : [];
     const payload = createPayload(info);
-    const comment = makeComment(payload);
     const seenById = new Map();
     const seenByName = new Map();
     let watermarked = 0;
@@ -454,6 +496,7 @@
     encodePayload,
     decodePayload,
     makeComment,
+    makeDesc,
     stripWatermarks,
     insertWatermark,
     applyToSvg,
