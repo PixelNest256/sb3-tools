@@ -134,7 +134,12 @@
 
           <div class="strength" id="autoExtra">
             <div class="extra-opt">
-              <label class="opt opt-inline"><input type="checkbox" id="optPngOptimize"><span>PNG 無劣化圧縮（遅い・約10%小さく）</span></label>
+              <label class="opt opt-inline" for="optPngMode"><span>PNG</span></label>
+              <select id="optPngMode" class="select select-inline" aria-label="PNG の圧縮モード">
+                <option value="palette" selected>パレット（非可逆）</option>
+                <option value="lossless">無劣化（OxiPNG）</option>
+                <option value="keep">元のまま</option>
+              </select>
             </div>
             <div class="extra-opt">
               <label class="opt opt-inline"><input type="checkbox" id="optSvgToPng" checked><span>PNG の方が軽ければ SVG から変換</span></label>
@@ -158,7 +163,7 @@
                 <option value="128">128 kbps</option>
               </select>
             </div>
-            <p class="options-note auto-note">PNG 無劣化圧縮（OxiPNG）は PNG をわずかに小さくしますが、最も遅い工程です。既定ではオフです。SVG → PNG は、PNG の方が軽いときにベクター画像をパレット PNG に変換します（拡大しても鮮明なままにしたいときはオフにしてください）。</p>
+            <p class="options-note auto-note">パレットは強さに応じて PNG を 256/128/32 色に減色する非可逆処理です。無劣化は画素を変えず OxiPNG だけを適用し、小さくならないファイルは元のまま残します。SVG → PNG はパレットモードでのみ使用します。</p>
           </div>
         </div>
 

@@ -252,7 +252,9 @@
     zeroTopLevelCoords: "Zero top-level coordinates"
   };
   var MEDIA_LABELS = {
-    pngOptimize: "Optimize PNG",
+    pngOptimize: "OxiPNG after palette",
+    pngPalette: "PNG palette compression",
+    pngLossless: "PNG lossless (OxiPNG)",
     svgToPng: "SVG to PNG",
     minPx: "Minimum pixels",
     wavToMp3: "WAV to MP3",
@@ -287,7 +289,9 @@
     zeroTopLevelCoords: "トップレベル座標を 0 に"
   };
   var MEDIA_LABELS_JA = {
-    pngOptimize: "PNG を最適化",
+    pngOptimize: "パレット後の OxiPNG",
+    pngPalette: "PNG パレット圧縮",
+    pngLossless: "PNG 無劣化（OxiPNG）",
     svgToPng: "SVG を PNG に変換",
     minPx: "最小 1px に拡大",
     wavToMp3: "WAV を MP3 に変換",

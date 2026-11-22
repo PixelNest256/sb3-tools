@@ -292,7 +292,7 @@
     freqIds: true,
     dropObscuredShadows: true,
     removeUnreachable: true,
-    clearInitialValues: true,
+    clearInitialValues: false,
     extractDuplicates: true,
     nearDuplicates: true,
     simplifyIfElse: true,
@@ -307,7 +307,7 @@
     removeDeadAssets: false,
     removeWriteOnly: false,
     normalizeTypes: false,
-    stripNullFieldIds: true,
+    stripNullFieldIds: false,
     zeroTopLevelCoords: false
   };
 
@@ -348,6 +348,7 @@
         comments_removed: 0, workspace_compacted: 0, float_values_rounded: 0,
         optimization_passes: 0,
         dead_costumes_removed: 0, dead_sounds_removed: 0, dead_sprites_removed: 0,
+        dead_assets_skipped: 0,
         writeonly_vars_removed: 0, writeonly_lists_removed: 0,
         md5ext_removed: 0, numeric_strings_normalized: 0, meta_agent_cleared: 0
       };
@@ -386,7 +387,6 @@
       this.unknownReadListIds = new Set();
       this.displayVarIds = new Set();
       this.displayListIds = new Set();
-      this.layerExpect = 0;
     }
 
     run(project) {
@@ -464,7 +464,6 @@
         this._renameStores(targets);
       } else if (o.removeUnused) this._dropUnused(targets);
 
-      this.layerExpect = 0;
       const n = targets.length;
       // Re-running the cheap restructure steps is part of the option itself:
       // keep going while a pass still finds something (or the 10-pass cap is
@@ -838,6 +837,15 @@
       this.listByTarget = new Map();
       this.varMap = new Map();
       this.listMap = new Map();
+      // A project may reuse one variable id in several targets for unrelated
+      // local variables (Splatoon reuses `i1`, `x`, `y`, ...).  Ids are only
+      // unique within a target, so the flat maps above cannot name them: the
+      // last target would overwrite the mapping and every earlier target would
+      // rewrite its blocks to a store that belongs somewhere else.  Keep the
+      // full mapping per target and let `_renameStores` / `_renameBlocks`
+      // resolve in the scope that will actually run the block.
+      this.storePlanByTarget = new Map();
+      this.stageTarget = stageInfo ? stageInfo.tgt : null;
       const order = stageInfo
         ? [stageInfo, ...infos.filter((info) => info !== stageInfo)]
         : infos;
@@ -850,9 +858,12 @@
           if (!this.listByTarget.has(tname)) this.listByTarget.set(tname, new Map());
           listScope = this.listByTarget.get(tname);
         }
+        const varPlan = new Map();
+        const listPlan = new Map();
         for (const e of info.vars) {
           const name = info.plan.varNames.get(e.id);
           const mapping = e.kept ? [e.id, name] : [nextStoreId(), name];
+          varPlan.set(e.id, mapping);
           this.varMap.set(e.id, mapping);
           if (!this.varByName.has(e.name) || e.kept) this.varByName.set(e.name, mapping);
           if (varScope && (!varScope.has(e.name) || e.kept)) varScope.set(e.name, mapping);
@@ -860,11 +871,28 @@
         for (const e of info.lists) {
           const name = info.plan.listNames.get(e.id);
           const mapping = e.kept ? [e.id, name] : [nextStoreId(), name];
+          listPlan.set(e.id, mapping);
           this.listMap.set(e.id, mapping);
           if (!this.listByName.has(e.name) || e.kept) this.listByName.set(e.name, mapping);
           if (listScope && (!listScope.has(e.name) || e.kept)) listScope.set(e.name, mapping);
         }
+        info.plan.varMap = varPlan;
+        info.plan.listMap = listPlan;
+        this.storePlanByTarget.set(info.tgt, info.plan);
       }
+    }
+
+    _storeMappingFor(tgt, kind, id) {
+      if (!isStr(id)) return null;
+      const plan = tgt ? this.storePlanByTarget.get(tgt) : null;
+      const own = plan ? (kind === "v" ? plan.varMap : plan.listMap).get(id) : null;
+      if (own) return own;
+      if (tgt && this.stageTarget && tgt !== this.stageTarget) {
+        const stagePlan = this.storePlanByTarget.get(this.stageTarget);
+        const global = stagePlan ? (kind === "v" ? stagePlan.varMap : stagePlan.listMap).get(id) : null;
+        if (global) return global;
+      }
+      return (kind === "v" ? this.varMap : this.listMap).get(id) || null;
     }
 
     // Broadcasts are numbered before `removeNoops` drops the messages nothing
@@ -880,8 +908,11 @@
     // aborting the rest of `domToWorkspace`.  Half the scripts then go missing
     // from the editor even though the VM loads the project fine.
     _compactBroadcasts(targets) {
-      const renameStores = this.options.renameStores;
       const taken = new Set();
+      for (const plan of this.storePlanByTarget.values()) {
+        for (const m of plan.varMap.values()) taken.add(m[0]);
+        for (const m of plan.listMap.values()) taken.add(m[0]);
+      }
       for (const m of this.varMap.values()) taken.add(m[0]);
       for (const m of this.listMap.values()) taken.add(m[0]);
       let seq = 0;
@@ -902,7 +933,7 @@
         for (const [bid, ent] of Object.entries(broadcasts)) {
           const name = isArr(ent) && ent.length ? ent[0] : ent;
           const short = nextId();
-          const mapping = [short, renameStores ? short : name];
+          const mapping = [short, name];
           this.bcMap.set(bid, mapping);
           if (!this.bcByName.has(name)) this.bcByName.set(name, mapping);
         }
@@ -931,13 +962,10 @@
     }
 
     _collect(targets) {
-      let bcIdSeq = 0, bcNameSeq = 0;
+      let bcIdSeq = 0;
       const total = Math.max(targets.length, 1);
-      // IDs and names are separate passes: shortenIds owns internal ids,
-      // renameStores owns the names people can see.
-      const renameStores = this.options.renameStores;
+      // shortenIds owns internal block ids.  Broadcast labels are kept as-is.
       const nextBcId = () => encodeId(++bcIdSeq);
-      const nextBcName = () => encodeId(++bcNameSeq);
       for (let idx = 0; idx < targets.length; idx++) {
         const tgt = targets[idx];
         if (!isDict(tgt)) continue;
@@ -963,7 +991,7 @@
         const broadcasts = isDict(tgt.broadcasts) ? tgt.broadcasts : {};
         for (const [bid, ent] of Object.entries(broadcasts)) {
           const name = isArr(ent) && ent.length ? ent[0] : ent;
-          const mapping = [nextBcId(), renameStores ? nextBcName() : name];
+          const mapping = [nextBcId(), name];
           this.bcMap.set(bid, mapping);
           if (!this.bcByName.has(name)) this.bcByName.set(name, mapping);
         }
@@ -1005,9 +1033,12 @@
       };
       const markUnknownField = (pid) => {
         if (!isStr(pid)) return;
+        // An unknown field can name a variable or a list; the same id may
+        // exist in both tables, so mark both rather than guessing the kind.
         if (this.varMap.has(pid)) {
           usedV.add(pid); readV.add(pid); unknownReadV.add(pid);
-        } else if (this.listMap.has(pid)) {
+        }
+        if (this.listMap.has(pid)) {
           usedL.add(pid); readL.add(pid); unknownReadL.add(pid);
         }
       };
@@ -1432,30 +1463,66 @@
           if (!isDict(blk) || blk.topLevel !== true) continue;
           if (blk.opcode === "procedures_definition") {
             const nxt = blk.next;
-            if (isStr(nxt) && has(blocks, nxt)) scripts.push([blocks, nxt]);
+            if (isStr(nxt) && has(blocks, nxt)) scripts.push([blocks, nxt, tgt]);
           } else {
-            scripts.push([blocks, bid]);
+            scripts.push([blocks, bid, tgt]);
           }
         }
       }
 
+      // A variable id may be reused by several targets.  Resolve a block's
+      // reference in the scope that will run it (the sprite, then the stage),
+      // not against a project-wide id table.  Without this, a write in one
+      // sprite could be mistaken for an initialization of another sprite's
+      // unrelated local store and clear a starting value that a script reads.
+      let refTgt = null;
+      let declTgt = null;
+      const storeTable = (tgt, kind) => {
+        if (!isDict(tgt)) return null;
+        const table = kind === "v" ? tgt.variables : tgt.lists;
+        return isDict(table) ? table : null;
+      };
+      const tableHasId = (tgt, kind, id) => {
+        const table = storeTable(tgt, kind);
+        return !!table && isStr(id) && has(table, id);
+      };
+      const tableHasName = (tgt, kind, name) => {
+        const table = storeTable(tgt, kind);
+        if (!table || !isStr(name)) return false;
+        for (const ent of Object.values(table)) {
+          if (isArr(ent) && ent.length && ent[0] === name) return true;
+        }
+        return false;
+      };
+      const storeVisible = (kind, id, name) => {
+        if (!refTgt || !declTgt) return true;
+        if (refTgt === declTgt) return true;
+        if (isStr(id)) {
+          if (tableHasId(refTgt, kind, id)) return false;
+          return declTgt === self.stageTarget && tableHasId(declTgt, kind, id);
+        }
+        if (tableHasName(refTgt, kind, name)) return false;
+        return declTgt === self.stageTarget && tableHasName(declTgt, kind, name);
+      };
       const fieldMatches = (fv, kind, sid, sname) => {
         if (!isArr(fv) || !fv.length) return false;
         const fid = fv.length > 1 ? fv[1] : null;
-        const table = kind === "v" ? self.varMap : self.listMap;
-        if (isStr(fid) && fid === sid) return true;
-        if (!isStr(fid) || !table.has(fid)) return fv[0] === sname;
-        return false;
+        if (isStr(fid) && fid === sid) return storeVisible(kind, sid, sname);
+        if (isStr(fid) && (tableHasId(refTgt, kind, fid) || tableHasId(self.stageTarget, kind, fid))) {
+          return false;
+        }
+        return fv[0] === sname && storeVisible(kind, null, sname);
       };
       const primitiveMatches = (p, kind, sid, sname) => {
         if (!isArr(p) || !p.length) return false;
         if (kind === "v" && p[0] !== 12) return false;
         if (kind === "l" && p[0] !== 13) return false;
         const pid = p.length > 2 ? p[2] : null;
-        const table = kind === "v" ? self.varMap : self.listMap;
-        if (isStr(pid) && pid === sid) return true;
-        if (!isStr(pid) || !table.has(pid)) return p.length > 1 && p[1] === sname;
-        return false;
+        if (isStr(pid) && pid === sid) return storeVisible(kind, sid, sname);
+        if (isStr(pid) && (tableHasId(refTgt, kind, pid) || tableHasId(self.stageTarget, kind, pid))) {
+          return false;
+        }
+        return p.length > 1 && p[1] === sname && storeVisible(kind, null, sname);
       };
       const reporterReads = (blocks, blk, kind, sid, sname, seen) => {
         if (!isDict(blk)) return false;
@@ -1610,10 +1677,12 @@
         }
         return true;
       };
-      const canClear = (kind, sid, sname) => {
+      const canClear = (kind, sid, sname, storeTgt) => {
         let touchedAny = false;
         let initializedAny = false;
-        for (const [blocks, start] of scripts) {
+        for (const [blocks, start, scriptTgt] of scripts) {
+          refTgt = scriptTgt;
+          declTgt = storeTgt;
           const [touched, safe, hasInit] = analyzeScript(blocks, start, kind, sid, sname);
           if (!touched) continue;
           touchedAny = true;
@@ -1636,7 +1705,7 @@
             // changing what the project stores, so leave those alone.
             if (!oldSize || oldSize.length < 6) continue;
             const name = ent.length ? ent[0] : this.varOrigName.get(vid);
-            if (canClear("v", vid, name)) {
+            if (canClear("v", vid, name, tgt)) {
               ent[1] = "";
               st.vars_initialized += 1;
             }
@@ -1650,7 +1719,7 @@
             const oldSize = JSON.stringify(ent[1]);
             if (!oldSize || oldSize.length < 6) continue;
             const name = ent.length ? ent[0] : this.listOrigName.get(lid);
-            if (canClear("l", lid, name)) {
+            if (canClear("l", lid, name, tgt)) {
               ent[1] = [];
               st.lists_initialized += 1;
             }
@@ -1666,9 +1735,10 @@
         if (!isDict(tgt)) continue;
         if (isDict(tgt.variables) && Object.keys(tgt.variables).length) {
           const out = {};
+          const varPlan = this.storePlanByTarget.get(tgt);
           for (const [k, ent] of Object.entries(tgt.variables)) {
             if (dropV && this.droppedVarIds.has(k)) { st.vars_removed += 1; continue; }
-            const m = this.varMap.get(k);
+            const m = (varPlan && varPlan.varMap.get(k)) || this.varMap.get(k);
             if (!m) { out[k] = ent; continue; }
             out[m[0]] = [m[1], ...ent.slice(1)];
           }
@@ -1676,9 +1746,10 @@
         }
         if (isDict(tgt.lists) && Object.keys(tgt.lists).length) {
           const out = {};
+          const listPlan = this.storePlanByTarget.get(tgt);
           for (const [k, ent] of Object.entries(tgt.lists)) {
             if (dropV && this.droppedListIds.has(k)) { st.lists_removed += 1; continue; }
-            const m = this.listMap.get(k);
+            const m = (listPlan && listPlan.listMap.get(k)) || this.listMap.get(k);
             if (!m) { out[k] = ent; continue; }
             out[m[0]] = [m[1], ...ent.slice(1)];
           }
@@ -1715,11 +1786,11 @@
             st.fields_removed += 1;
           }
         }
-        if (has(tgt, "layerOrder") && looseEq(tgt.layerOrder, this.layerExpect)) {
-          delete tgt.layerOrder;
-          this.layerExpect += 1;
-          st.fields_removed += 1;
-        }
+        // Do not drop layerOrder.  The deserializer sorts targets by it, but
+        // an undefined value compares as NaN and is treated as equal to every
+        // other layer, so a missing layer can move a sprite to the front.  The
+        // saved bytes are tiny compared with putting a background overlay in
+        // front of the whole scene.
         for (const cos of (isArr(tgt.costumes) ? tgt.costumes : [])) {
           if (!isDict(cos)) continue;
           // `bitmapResolution` is ignored for SVG costumes, but it is
@@ -2098,6 +2169,12 @@
         if (this._spliceOut(blocks, bid)) st.noop_broadcasts_removed += 1;
       }
 
+      // A message definition is the only place a broadcast id lives.  When
+      // names are being rewritten, keep the definitions even after their last
+      // static send/receiver disappears: an id-less send in another target
+      // can only be reconnected by name, and the later renumbering has no
+      // mapping for a definition that was removed here.
+      if (this.options.renameStores) return;
       const used = new Set();
       for (const tgt of targets) {
         if (!isDict(tgt) || !isDict(tgt.blocks)) continue;
@@ -4977,9 +5054,9 @@
         if (t === 12 || t === 13) {
           const name = p.length > 1 ? p[1] : "";
           const pid = p.length > 2 ? p[2] : null;
-          const table = t === 12 ? this.varMap : this.listMap;
+          const kind = t === 12 ? "v" : "l";
           const byName = t === 12 ? varByName : listByName;
-          let m = pid ? table.get(pid) : null;
+          let m = this._storeMappingFor(tgt, kind, pid);
           if (!m) m = byName(name);
           if (!m) return p;
           return [t, m[1], m[0], ...p.slice(3)];
@@ -5071,9 +5148,9 @@
               }
               let m = null;
               if (k === "VARIABLE") {
-                m = (fid ? this.varMap.get(fid) : null) || varByName(name);
+                m = this._storeMappingFor(tgt, "v", fid) || varByName(name);
               } else if (k === "LIST") {
-                m = (fid ? this.listMap.get(fid) : null) || listByName(name);
+                m = this._storeMappingFor(tgt, "l", fid) || listByName(name);
               } else if (k === "BROADCAST_OPTION") {
                 m = (fid ? this.bcMap.get(fid) : null) || this.bcByName.get(name);
               }
@@ -5282,7 +5359,7 @@
         if (isDict(tgt) && isStr(tgt.name) && !byName.has(tgt.name)) byName.set(tgt.name, tgt);
       }
 
-      const ALL_COSTUME_WORDS = new Set(["next costume", "previous costume"]);
+      const ALL_COSTUME_WORDS = new Set(["next costume", "previous costume", "random costume"]);
       const ALL_BACKDROP_WORDS = new Set(["next backdrop", "previous backdrop", "random backdrop"]);
       const SPRITE_MENU_KEYS = new Set(["TO", "TOWARDS", "TOUCHINGOBJECTMENU",
         "DISTANCETOMENU", "CLONE_OPTION", "OBJECT"]);
@@ -5298,7 +5375,7 @@
         const refs = {
           allCostumes: new Set(), allSounds: new Set(),
           costumes: new Map(), sounds: new Map(),
-          sprites: new Set(), dynamicSprites: false
+          sprites: new Set(), dynamicSprites: false, direct: true
         };
         const wantCostume = (tgt, name) => {
           if (!isDict(tgt) || !isStr(name)) return;
@@ -5334,6 +5411,7 @@
               for (const key of SPRITE_MENU_KEYS) {
                 if (has(blk.inputs, key) && menuFieldValue(blocks, blk, key) === null) {
                   refs.dynamicSprites = true;
+                  refs.direct = false;
                 }
               }
             }
@@ -5345,7 +5423,7 @@
             } else if (op === "looks_costumenumbername") {
               const fv = isDict(blk.fields) ? blk.fields.NUMBER_NAME : null;
               // `number` reports a slot, so every costume has to keep its own.
-              if (!isArr(fv) || fv[0] !== "name") refs.allCostumes.add(tgt);
+              if (!isArr(fv) || fv[0] !== "name") { refs.allCostumes.add(tgt); refs.direct = false; }
             } else if (op === "looks_backdropnumbername") {
               const fv = isDict(blk.fields) ? blk.fields.NUMBER_NAME : null;
               if (!isArr(fv) || fv[0] !== "name") {
@@ -5386,7 +5464,7 @@
                   }
                 } else {
                   const owner = obj === "_stage_" ? stage : byName.get(obj);
-                  if (isDict(owner)) refs.allCostumes.add(owner);
+                  if (isDict(owner)) { refs.allCostumes.add(owner); refs.direct = false; }
                 }
               }
             }
@@ -5409,6 +5487,10 @@
             }
           }
         }
+        // Every asset reference must be a literal menu value.  If any call
+        // can pick a costume or sound at run time, dropping anything could
+        // remove the asset it lands on, so the whole pass is skipped.
+        refs.direct = refs.direct && refs.allCostumes.size === 0 && refs.allSounds.size === 0;
         return refs;
       };
 
@@ -5421,6 +5503,13 @@
       // one can make the next one dead: settle the survivors first.
       let alive = targets.slice();
       let refs = analyze(alive);
+      // The option only runs when every costume and sound reference is a
+      // literal, statically known menu value.  A computed name or an index
+      // makes the target of a switch unknowable, so skip the pass entirely.
+      if (!refs.direct) {
+        st.dead_assets_skipped += 1;
+        return targets;
+      }
       for (let round = 0; round < 8; round++) {
         if (refs.dynamicSprites) break;
         const next = alive.filter((tgt) => {
@@ -5515,11 +5604,12 @@
       // Anything that mentions a store from a block we are not going to delete
       // also keeps it.  The scanner's read sets are the primary gate; this is
       // the belt-and-braces one.
-      const referenced = new Set();
+      const referencedV = new Set();
+      const referencedL = new Set();
       const scanPrim = (node) => {
         if (!isArr(node)) return;
         if (node.length > 2 && (node[0] === 12 || node[0] === 13) && isStr(node[2])) {
-          referenced.add(node[2]);
+          (node[0] === 12 ? referencedV : referencedL).add(node[2]);
           return;
         }
         for (const item of node) scanPrim(item);
@@ -5534,40 +5624,67 @@
           }
           if (varCmd.has(op) || listCmd.has(op)) continue;
           const vid = fieldId(blk, "VARIABLE");
-          if (isStr(vid)) referenced.add(vid);
+          if (isStr(vid)) referencedV.add(vid);
           const lid = fieldId(blk, "LIST");
-          if (isStr(lid)) referenced.add(lid);
+          if (isStr(lid)) referencedL.add(lid);
           if (isDict(blk.inputs)) {
             for (const v of Object.values(blk.inputs)) scanPrim(v);
           }
         }
       }
 
-      const removed = new Set();
+      // An id is only removable when every target that declares it agrees.
+      // A sprite may reuse one id for an unrelated local store, so deleting
+      // the id globally after finding one write-only copy could take the other
+      // target's writer with it.  Block the whole id if any declaration is
+      // read, cloud-backed, loop-owned, or not written.
+      const blockedV = new Set();
+      const blockedL = new Set();
       for (const tgt of targets) {
         if (!isDict(tgt)) continue;
         if (isDict(tgt.variables)) {
           for (const [id, ent] of Object.entries(tgt.variables)) {
             const name = isArr(ent) && ent.length ? ent[0] : String(ent);
-            if (isStr(name) && name.startsWith(CLOUD_PREFIX)) continue;
-            if (keepV.has(id) || loopV.has(id) || referenced.has(id)) continue;
-            if (!this.writeVarIds.has(id)) continue;
-            delete tgt.variables[id];
-            st.writeonly_vars_removed += 1;
-            removed.add(id);
+            if (isStr(name) && name.startsWith(CLOUD_PREFIX)) {
+              blockedV.add(id);
+            } else if (keepV.has(id) || loopV.has(id) ||
+                referencedV.has(id) || !this.writeVarIds.has(id)) {
+              blockedV.add(id);
+            }
           }
         }
         if (isDict(tgt.lists)) {
           for (const id of Object.keys(tgt.lists)) {
-            if (keepL.has(id) || referenced.has(id)) continue;
-            if (!this.writeListIds.has(id)) continue;
-            delete tgt.lists[id];
-            st.writeonly_lists_removed += 1;
-            removed.add(id);
+            if (keepL.has(id) || referencedL.has(id) ||
+                !this.writeListIds.has(id)) {
+              blockedL.add(id);
+            }
           }
         }
       }
-      if (!removed.size) return;
+
+      const removedV = new Set();
+      const removedL = new Set();
+      for (const tgt of targets) {
+        if (!isDict(tgt)) continue;
+        if (isDict(tgt.variables)) {
+          for (const id of Object.keys(tgt.variables)) {
+            if (blockedV.has(id)) continue;
+            delete tgt.variables[id];
+            st.writeonly_vars_removed += 1;
+            removedV.add(id);
+          }
+        }
+        if (isDict(tgt.lists)) {
+          for (const id of Object.keys(tgt.lists)) {
+            if (blockedL.has(id)) continue;
+            delete tgt.lists[id];
+            st.writeonly_lists_removed += 1;
+            removedL.add(id);
+          }
+        }
+      }
+      if (!removedV.size && !removedL.size) return;
 
       for (const tgt of targets) {
         if (!isDict(tgt.blocks)) continue;
@@ -5579,6 +5696,7 @@
           const key = varCmd.has(op) ? "VARIABLE" : listCmd.has(op) ? "LIST" : null;
           if (key === null) continue;
           const id = fieldId(blk, key);
+          const removed = key === "VARIABLE" ? removedV : removedL;
           if (isStr(id) && removed.has(id)) gone.set(bid, blk);
         }
         if (!gone.size) continue;
@@ -5645,8 +5763,12 @@
       // Resolving by name would also drop another sprite's monitor for a local
       // variable that happens to share the name.
       if (isArr(monitors)) {
-        const keptMons = monitors.filter((mon) =>
-          !(isDict(mon) && isStr(mon.id) && removed.has(mon.id)));
+        const keptMons = monitors.filter((mon) => {
+          if (!isDict(mon) || !isStr(mon.id)) return true;
+          const removed = mon.opcode === "data_listcontents" || mon.mode === "list"
+            ? removedL : removedV;
+          return !removed.has(mon.id);
+        });
         if (keptMons.length !== monitors.length) {
           monitors.length = 0;
           for (const m of keptMons) monitors.push(m);

@@ -108,20 +108,30 @@
         </div>
 
         <p class="options-note" style="margin-bottom:6px">プロジェクトデータ — <code>project.json</code> の圧縮（動作は保ちます）:</p>
+
+        <div class="preset-bar">
+          <span class="preset-label" id="preset-label">プリセット</span>
+          <div class="preset-list" role="group" aria-labelledby="preset-label">
+            <button type="button" class="preset-btn" data-preset="clean" aria-pressed="false" title="project.json を小さくするだけ。すべての変換をオフにします。">JSON クリーンアップのみ</button>
+            <button type="button" class="preset-btn" data-preset="safe" aria-pressed="false" title="内部 ID、未使用の変数、到達しないコード、隠れた既定値を削除。名前は変えません。">見た目変化なし</button>
+            <button type="button" class="preset-btn" data-preset="cleanup" aria-pressed="false" title="名前の短縮、何もしないブロックの削除、if-else の簡略化、1回だけの定義の展開、定数の畳み込みも行います。">コードクリーンアップ</button>
+            <button type="button" class="preset-btn" data-preset="optimize" aria-pressed="true" title="繰り返すコードの抽出、似たコードの統合、繰り返しのループ化も行います。">コード最適化</button>
+            <button type="button" class="preset-btn" data-preset="max" aria-pressed="false" title="プロジェクトデータの整理に加えて、安全条件を満たす範囲でアセットと書き込み専用ストアを削除。保存値の書き換えやフィールド形の変更はオフ。">最大</button>
+            <span class="preset-custom" id="presetCustom" role="status" hidden>カスタム</span>
+          </div>
+        </div>
+
         <div class="opt-grid">
           <fieldset class="opt-group">
             <legend>容量を削る</legend>
             <label class="opt"><input type="checkbox" checked data-popt="stripDefaults"><span>Scratch が復元する値を削除</span></label>
             <label class="opt"><input type="checkbox" checked data-popt="removeUnused"><span>未使用の変数とリストを削除</span></label>
-            <label class="opt"><input type="checkbox" checked data-popt="clearInitialValues"><span>上書きされる初期値を空にする</span></label>
             <label class="opt"><input type="checkbox" checked data-popt="dropObscuredShadows"><span>隠れた入力の既定値を削除</span></label>
             <label class="opt"><input type="checkbox" checked data-popt="removeUnreachable"><span>実行されないコードを削除</span></label>
             <label class="opt"><input type="checkbox" data-popt="stripComments"><span>すべてのコメントを削除（内容は失われます）</span></label>
-            <label class="opt"><input type="checkbox" checked data-popt="stripNullFieldIds"><span>null のフィールドIDを削除</span></label>
             <label class="opt"><input type="checkbox" data-popt="zeroTopLevelCoords"><span>最上位ブロックの座標を0に</span></label>
-            <label class="opt"><input type="checkbox" data-popt="removeDeadAssets"><span>未使用のアセットを削除（コスチューム・サウンド・スプライト）</span></label>
-            <label class="opt"><input type="checkbox" data-popt="removeWriteOnly"><span>書き込み専用の変数とリストを削除</span></label>
-            <label class="opt"><input type="checkbox" data-popt="normalizeTypes"><span>型と表現を正規化</span></label>
+            <label class="opt" title="すべてのコスチューム・サウンド・スプライト参照が直接わかる値のときだけ実行し、動的な参照があればアセットを削除しません。"><input type="checkbox" data-popt="removeDeadAssets"><span>未使用アセットを削除（直接参照のみ）</span></label>
+            <label class="opt" title="書き込まれるだけで読まれない変数・リストを削除します。ID と名前の両方で参照を解決します。"><input type="checkbox" data-popt="removeWriteOnly"><span>書き込み専用の変数とリストを削除</span></label>
           </fieldset>
           <fieldset class="opt-group">
             <legend>構造をまとめる</legend>
@@ -136,12 +146,19 @@
           <fieldset class="opt-group">
             <legend>名前と定数</legend>
             <label class="opt"><input type="checkbox" checked data-popt="shortenIds"><span>内部 ID を短縮</span></label>
-            <label class="opt" title="内部 ID の短縮がオンのときだけ、名前も変わります。"><input type="checkbox" checked data-popt="renameStores"><span>変数・リスト・メッセージ名も短縮</span></label>
+            <label class="opt" title="内部 ID の短縮がオンのときだけ、名前も変わります。"><input type="checkbox" checked data-popt="renameStores"><span>変数・リスト名も短縮</span></label>
             <label class="opt"><input type="checkbox" checked data-popt="freqIds"><span>頻出ブロックを短い ID に</span></label>
             <label class="opt"><input type="checkbox" checked data-popt="compressProcs"><span>カスタムブロック名を短縮</span></label>
             <label class="opt"><input type="checkbox" checked data-popt="foldConstants"><span>定数計算を畳み込む</span></label>
             <label class="opt"><input type="checkbox" checked data-popt="propagateConstants"><span>定数変数を値に置換</span></label>
             <label class="opt" title="非表示のモニターを削除し、その変数・リストを名前短縮や削除の対象にします。表示中のモニターは残ります（保存値は消去）。"><input type="checkbox" data-popt="removeMonitors"><span>モニターと位置を保持しない</span></label>
+          </fieldset>
+          <fieldset class="opt-group opt-group--danger">
+            <legend>危険</legend>
+            <p class="danger-note">保存値やフィールドの形を書き換えます。必要な場合だけオンにして、動作を確認してください。</p>
+            <label class="opt"><input type="checkbox" data-popt="clearInitialValues"><span>上書きされる初期値を空にする</span></label>
+            <label class="opt"><input type="checkbox" data-popt="normalizeTypes"><span>型と表現を正規化</span></label>
+            <label class="opt"><input type="checkbox" data-popt="stripNullFieldIds"><span>null のフィールドIDを削除</span></label>
           </fieldset>
         </div>
 
@@ -159,7 +176,12 @@
           </div>
           <div class="strength" id="autoExtra">
             <div class="extra-opt">
-              <label class="opt opt-inline"><input type="checkbox" id="optPngOptimize"><span>PNG 無劣化圧縮（遅い・約10%小さく）</span></label>
+              <label class="opt opt-inline" for="optPngMode"><span>PNG</span></label>
+              <select id="optPngMode" class="select select-inline" aria-label="PNG の圧縮モード">
+                <option value="palette" selected>パレット（非可逆）</option>
+                <option value="lossless">無劣化（OxiPNG）</option>
+                <option value="keep">元のまま</option>
+              </select>
             </div>
             <div class="extra-opt">
               <label class="opt opt-inline"><input type="checkbox" id="optSvgToPng" checked><span>PNG の方が軽ければ SVG から変換</span></label>
@@ -183,7 +205,7 @@
                 <option value="128">128 kbps</option>
               </select>
             </div>
-            <p class="options-note auto-note">PNG 無劣化圧縮（OxiPNG）は PNG をわずかに小さくしますが、最も遅い工程です。既定ではオフです。SVG → PNG は、PNG の方が軽いときにベクター画像をパレット PNG に変換します（拡大しても鮮明なままにしたいときはオフにしてください）。</p>
+            <p class="options-note auto-note">パレットは強さに応じて PNG を 256/128/32 色に減色する非可逆処理です。無劣化は画素を変えず OxiPNG だけを適用し、小さくならないファイルは元のまま残します。SVG → PNG はパレットモードでのみ使用します。</p>
           </div>
         </div>
 

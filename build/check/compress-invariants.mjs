@@ -40,7 +40,23 @@
  *      the wrong sprite's value into a script;
  *  13. a cloud variable keeps its name when stores are renamed: the name is
  *      the key the cloud server stores the value under, so shortening it
- *      would reset the project's cloud data.
+ *      would reset the project's cloud data;
+ *  14. a variable id reused by several targets is renamed in each target's
+ *      own scope, so one target cannot steal another target's store name;
+ *  15. removing no-op messages does not delete a broadcast definition while
+ *      store names are being rewritten, because the later renumbering has no
+ *      mapping for the removed message;
+ *  16. layerOrder survives: the loader sorts by it, and dropping only the
+ *      values that happen to match 0,1,... makes the missing sprite compare as
+ *      NaN and move to the front;
+ *  17. a starting value is cleared only from the target (or stage) scope that
+ *      actually resolves the reference, so another sprite reusing that id
+ *      cannot prove the store is overwritten;
+ *  18. broadcast display names survive `renameStores`.  A send without an id
+ *      resolves by name, so shortening two same-named definitions to different
+ *      labels disconnects the send from its receiver;
+ *  19. removing a variable and a list that share an id is tracked separately,
+ *      so deleting the variable's writer cannot delete the list's writer.
  *
  * Invariants 1-3 were broken by "remove legacy mutation keys"; 4 by clearing
  * every overwritten value; 5 by "shorten internal IDs" and by near-duplicate
@@ -48,9 +64,14 @@
  * 10 by numbering block ids per target while Blockly keeps one global registry;
  * 11 by leaving a nested SUBSTACK chain out of the near-duplicate signature;
  * 12 by keying the constant store by variable id only; 13 was never broken in
- * a release, but renaming a cloud key would silently reset cloud data.  All of
- * the others reached users and made projects fail to load or behave
- * differently.
+ * a release, but renaming a cloud key would silently reset cloud data; 14 and
+ * 15 were broken by Splatoon's reused local ids and its empty notification
+ * messages; 16 was broken by dropping layerOrder from the stage and the
+ * background UI while keeping the other layers; 17 was another consequence of
+ * a project-wide id table in the starting-value pass; 18 by renaming the
+ * labels of two same-named messages to different strings; 19 by keeping one
+ * removed-id set for both store kinds.  All of the others
+ * reached users and made projects fail to load or behave differently.
  */
 import { createRequire } from "node:module";
 import path from "node:path";
@@ -271,7 +292,7 @@ function audit(project) {
   issues.forEach((i) => check(false, i));
 }
 
-const options = new SB3.Options({ removeMonitors: true });
+const options = new SB3.Options({ removeMonitors: true, clearInitialValues: true });
 const out = SB3.compressProject(buildProject(), options, () => {});
 audit(out.project);
 
@@ -1596,6 +1617,40 @@ check(!!(loopSprite.variables || {}).I1, "control_for_each lost its loop variabl
 check(opcodesOf(loopSprite).includes("control_for_each"), "control_for_each itself was removed");
 check(opcodesOf(loopSprite).includes("looks_say"), "the body of control_for_each was removed");
 
+// A variable and a list may reuse one id.  Removing the write-only variable
+// must not take the list's writer with it; the two store kinds need separate
+// removed-id sets.
+const sharedId = "sharedStoreId000001";
+const sharedStoreRun = SB3.compressProject(buildMiniProject([
+  stageOf(),
+  buildTarget("Sprite1", false, {
+    variables: { [sharedId]: ["v", 0] },
+    lists: { [sharedId]: ["l", [1, 2]] },
+    blocks: {
+      flag: blk("event_whenflagclicked", { topLevel: true, x: 40, y: 40, next: "setV" }),
+      setV: blk("data_setvariableto", {
+        parent: "flag", next: "addL",
+        inputs: { VALUE: [1, [4, "0"]] }, fields: { VARIABLE: ["v", sharedId] }
+      }),
+      addL: blk("data_addtolist", {
+        parent: "setV", next: "readL",
+        inputs: { ITEM: [1, [10, "z"]] }, fields: { LIST: ["l", sharedId] }
+      }),
+      readL: blk("data_itemoflist", {
+        parent: "addL", next: "say",
+        inputs: { INDEX: [1, [7, "1"]] }, fields: { LIST: ["l", sharedId] }
+      }),
+      say: blk("looks_say", { parent: "readL", inputs: { MESSAGE: [1, [10, "ok"]] } })
+    }
+  })
+]), new SB3.Options({ removeWriteOnly: true, shortenIds: false }), () => {});
+audit(sharedStoreRun.project);
+const sharedSprite = findTarget(sharedStoreRun.project, "Sprite1");
+check(!(sharedSprite.variables || {})[sharedId], "the write-only variable was not removed");
+check(!!(sharedSprite.lists || {})[sharedId], "a list sharing the removed variable id was deleted");
+check(opcodesOf(sharedSprite).includes("data_addtolist"),
+  "a list writer sharing the removed variable id was deleted");
+
 // `sensing_of [variable] of [sprite]` reads a scalar variable by name.
 const sensedRun = SB3.compressProject(buildMiniProject([
   stageOf(),
@@ -2020,6 +2075,248 @@ const dupLocals = SB3.compressProject(buildDuplicateLocalVarProject(),
       `${tgt.name}'s local variable was folded to ${JSON.stringify(value)} instead of ${JSON.stringify(want)}`);
   }
 }
+
+/*
+ * 14. Store ids are only unique inside one target.  Splatoon reuses ids such
+ *     as `i1`, `x` and `y` in many sprites, sometimes under different names.
+ *     A single global old-id map made `_renameStores` write one target's name
+ *     into another target, which could leave two variables with the same name
+ *     in one scope.  The block references and the store table must both be
+ *     resolved in the running target's scope (then the stage).
+ */
+function buildScopedStoreProject() {
+  const UNIQUE_A = "uniqueStoreA000001";
+  const DUP = "duplicateStore000001";
+  const UNIQUE_B = "uniqueStoreB000001";
+  const make = (tag, order, y) => {
+    const variables = {};
+    for (const id of order) {
+      variables[id] = id === DUP ? ["shared", 1] : ["own", 2];
+    }
+    return {
+      isStage: false, name: `Scoped${tag}`,
+      variables, lists: {}, broadcasts: {},
+      blocks: {
+        [`hat${tag}`]: blk("event_whenflagclicked", { topLevel: true, x: 0, y, next: `say${tag}` }),
+        [`say${tag}`]: blk("looks_say", {
+          parent: `hat${tag}`,
+          inputs: { MESSAGE: [3, [12, "shared", DUP], [10, ""]] }
+        })
+      },
+      comments: {}, currentCostume: 0,
+      costumes: [], sounds: [], volume: 100, layerOrder: 0, visible: true,
+      x: 0, y: 0, size: 100, direction: 90, draggable: false, rotationStyle: "all around"
+    };
+  };
+  return {
+    // The first target puts the unique id before the shared one; the second
+    // does the reverse, so a global map assigns both duplicate ids the second
+    // target's generated name and collides with the first target's name.
+    targets: [
+      make("A", [UNIQUE_A, DUP], 0),
+      make("B", [DUP, UNIQUE_B], 500)
+    ],
+    monitors: [], extensions: [], meta: { semver: "3.0.0" }
+  };
+}
+
+const scoped = SB3.compressProject(buildScopedStoreProject(),
+  onlyOptions(["renameStores", "shortenIds"]), () => {});
+for (const tgt of scoped.project.targets) {
+  const entries = Object.entries(tgt.variables || {});
+  const names = entries.map(([, ent]) => (Array.isArray(ent) ? ent[0] : ent));
+  check(new Set(names).size === names.length,
+    `${tgt.name} has duplicate variable names after store renaming: ${JSON.stringify(names)}`);
+  const say = Object.values(tgt.blocks).find(
+    (b) => b && !Array.isArray(b) && b.opcode === "looks_say");
+  const entry = say && (say.inputs || {}).MESSAGE;
+  const prim = Array.isArray(entry) && Array.isArray(entry[1]) ? entry[1] : null;
+  const own = prim && entries.find(([id]) => id === prim[2]);
+  check(own && Array.isArray(own[1]) && own[1][0] === prim[1],
+    `${tgt.name}'s variable reference points outside its own scope: ${JSON.stringify(prim)}`);
+}
+
+/*
+ * 15. Removing a no-op message definition is not safe while store names are
+ *     going to be rewritten: a send stores its message name and an id, and a
+ *     definition removed here has no later mapping to reconnect an id-less
+ *     send.  Drop the empty receiver/send, but keep the definition; the lost
+ *     event is worth more than the few bytes saved.
+ */
+function buildNoopBroadcastProject() {
+  const BID = "broadcastNoop0000001";
+  return {
+    targets: [{
+      isStage: false, name: "Broadcast",
+      variables: {}, lists: {},
+      broadcasts: { [BID]: ["knock"] },
+      blocks: {
+        hat: blk("event_whenflagclicked", { topLevel: true, x: 0, y: 0, next: "send" }),
+        send: blk("event_broadcast", {
+          parent: "hat",
+          inputs: { BROADCAST_INPUT: [1, [11, "knock", BID]] }
+        }),
+        receive: blk("event_whenbroadcastreceived", {
+          topLevel: true, x: 0, y: 500, next: "stop",
+          fields: { BROADCAST_OPTION: ["knock", BID] }
+        }),
+        stop: blk("control_stop", {
+          parent: "receive", fields: { STOP_OPTION: ["this script", null] }
+        })
+      },
+      comments: {}, currentCostume: 0,
+      costumes: [], sounds: [], volume: 100, layerOrder: 0, visible: true,
+      x: 0, y: 0, size: 100, direction: 90, draggable: false, rotationStyle: "all around"
+    }],
+    monitors: [], extensions: [], meta: { semver: "3.0.0" }
+  };
+}
+
+const noopBroadcast = SB3.compressProject(buildNoopBroadcastProject(),
+  onlyOptions(["renameStores", "removeNoops"]), () => {});
+{
+  const tgt = noopBroadcast.project.targets[0];
+  const defs = new Set(Object.keys(tgt.broadcasts || {}));
+  check(defs.size === 1, `renameStores + removeNoops dropped the broadcast definition (${defs.size} left)`);
+  for (const b of Object.values(tgt.blocks)) {
+    if (!b || Array.isArray(b)) continue;
+    const fv = (b.fields || {}).BROADCAST_OPTION;
+    if (Array.isArray(fv) && fv[1]) check(defs.has(fv[1]),
+      "renameStores + removeNoops left a receiver pointing at a missing broadcast");
+    const inp = (b.inputs || {}).BROADCAST_INPUT;
+    const prim = Array.isArray(inp) && Array.isArray(inp[1]) ? inp[1] : null;
+    if (prim && prim[2]) check(defs.has(prim[2]),
+      "renameStores + removeNoops left a send pointing at a missing broadcast");
+  }
+}
+
+
+/*
+ * 16. layerOrder is not a per-target default that can be dropped on its own.
+ *     The deserializer sorts targets by layerOrder, so a missing value is an
+ *     undefined NaN comparison that leaves that sprite at the end of the sort.
+ *     In Splatoon only the stage and the background UI matched the assumed
+ *     0,1 prefix, so the UI moved from the back to the very front and its
+ *     hidden elements covered the scene.
+ */
+function buildLayerOrderProject() {
+  const target = (name, layerOrder, isStage) => ({
+    isStage: !!isStage, name,
+    variables: {}, lists: {}, broadcasts: {}, blocks: {},
+    comments: {}, currentCostume: 0,
+    costumes: [], sounds: [], volume: 100, layerOrder,
+    visible: true, x: 0, y: 0, size: 100, direction: 90,
+    draggable: false, rotationStyle: "all around"
+  });
+  return {
+    // The pane order is not layer order: the front sprite appears last.
+    targets: [
+      target("Stage", 0, true),
+      target("Back", 2),
+      target("Front", 1)
+    ],
+    monitors: [], extensions: [], meta: { semver: "3.0.0" }
+  };
+}
+
+const layerRun = SB3.compressProject(buildLayerOrderProject(),
+  onlyOptions(["stripDefaults"]), () => {});
+check(layerRun.project.targets.map((t) => t.layerOrder).join(",") === "0,2,1",
+  "stripDefaults changed layerOrder; a missing value can move a sprite to the front");
+
+
+/*
+ * 17. Starting values are cleared only from the scope that owns the store.
+ *     A sprite-wide id table used to treat a write in one sprite as proof that
+ *     another sprite's same-id local store is initialized, so a hidden-state
+ *     variable could be blanked and a sprite that should start hidden showed
+ *     up.  Only a reference that resolves to the owning target (or the stage
+ *     for a global) may clear that target's value.
+ */
+function buildInitialValueScopeProject() {
+  const DUP = "duplicateInitial0001";
+  const target = (name, value, blocks, layerOrder) => ({
+    isStage: false, name,
+    variables: { [DUP]: ["state", value] },
+    lists: {}, broadcasts: {}, blocks,
+    comments: {}, currentCostume: 0,
+    costumes: [], sounds: [], volume: 100, layerOrder,
+    visible: false, x: 0, y: 0, size: 100, direction: 90,
+    draggable: false, rotationStyle: "all around"
+  });
+  return {
+    targets: [
+      target("Keep", "START", {}, 2),
+      target("Write", "START", {
+        hat: blk("event_whenflagclicked", { topLevel: true, x: 0, y: 0, next: "set" }),
+        set: blk("data_setvariableto", {
+          parent: "hat",
+          fields: { VARIABLE: ["state", DUP] },
+          inputs: { VALUE: [1, [10, "0"]] }
+        })
+      }, 1)
+    ],
+    monitors: [], extensions: [], meta: { semver: "3.0.0" }
+  };
+}
+
+const initialScope = SB3.compressProject(buildInitialValueScopeProject(),
+  onlyOptions(["clearInitialValues"]), () => {});
+const DUP_INITIAL = "duplicateInitial0001";
+check(initialScope.project.targets[0].variables[DUP_INITIAL][1] === "START",
+  "clearInitialValues blanked a hidden-state store because another target reused its id");
+check(initialScope.project.targets[1].variables[DUP_INITIAL][1] === "",
+  "clearInitialValues left the genuinely initialized store alone");
+
+/*
+ * 18. A broadcast send may omit its id, in which case the VM matches the
+ *     receiver by display name.  Shortening every definition's name is only
+ *     safe while the names stay equal; two workspaces can define the same
+ *     message with different ids, and a name-only send must still reach both.
+ */
+function buildBroadcastNameProject() {
+  const target = (name, broadcastId, blocks, layerOrder) => ({
+    isStage: false, name,
+    variables: {}, lists: {},
+    broadcasts: { [broadcastId]: ["go", null] },
+    blocks, comments: {}, currentCostume: 0,
+    costumes: [], sounds: [], volume: 100, layerOrder,
+    visible: true, x: 0, y: 0, size: 100, direction: 90,
+    draggable: false, rotationStyle: "all around"
+  });
+  return {
+    targets: [
+      target("Sender", "broadcastSender01", {
+        hat: blk("event_whenflagclicked", { topLevel: true, x: 0, y: 0, next: "send" }),
+        send: blk("event_broadcast", {
+          parent: "hat",
+          inputs: { BROADCAST_INPUT: [1, [11, "go", null]] }
+        })
+      }, 2),
+      target("Receiver", "broadcastReceiver1", {
+        recv: blk("event_whenbroadcastreceived", {
+          topLevel: true, x: 0, y: 0, next: "show",
+          fields: { BROADCAST_OPTION: ["go", "broadcastReceiver1"] }
+        }),
+        show: blk("looks_show", { parent: "recv" })
+      }, 1)
+    ],
+    monitors: [], extensions: [], meta: { semver: "3.0.0" }
+  };
+}
+
+const broadcastRun = SB3.compressProject(buildBroadcastNameProject(),
+  onlyOptions(["renameStores", "shortenIds"]), () => {});
+const sender = broadcastRun.project.targets[0];
+const receiver = broadcastRun.project.targets[1];
+const sendBlock = Object.values(sender.blocks).find((b) => b && b.opcode === "event_broadcast");
+const recvBlock = Object.values(receiver.blocks).find((b) => b && b.opcode === "event_whenbroadcastreceived");
+const sent = sendBlock.inputs.BROADCAST_INPUT[1];
+const received = recvBlock.fields.BROADCAST_OPTION;
+check(sent[1] === "go" && received[0] === "go" &&
+    Object.values(sender.broadcasts).every((b) => b[0] === "go") &&
+    Object.values(receiver.broadcasts).every((b) => b[0] === "go"),
+  "renameStores changed a broadcast display name; a name-only send no longer matches");
 
 if (failures) {
   console.error(`\n${failures} check(s) failed`);

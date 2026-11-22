@@ -134,7 +134,12 @@
 
           <div class="strength" id="autoExtra">
             <div class="extra-opt">
-              <label class="opt opt-inline"><input type="checkbox" id="optPngOptimize"><span>PNG lossless pass (slower, ~10% smaller)</span></label>
+              <label class="opt opt-inline" for="optPngMode"><span>PNG</span></label>
+              <select id="optPngMode" class="select select-inline" aria-label="PNG compression mode">
+                <option value="palette" selected>Palette (lossy)</option>
+                <option value="lossless">Lossless (OxiPNG)</option>
+                <option value="keep">Keep original</option>
+              </select>
             </div>
             <div class="extra-opt">
               <label class="opt opt-inline"><input type="checkbox" id="optSvgToPng" checked><span>SVG → PNG when the PNG is smaller</span></label>
@@ -158,7 +163,7 @@
                 <option value="128">128 kbps</option>
               </select>
             </div>
-            <p class="options-note auto-note">The PNG lossless pass (OxiPNG) shaves a little more off each PNG but is the slowest step; it is off by default. SVG → PNG rasterises a vector costume to a palette PNG when that is smaller; turn it off to keep vectors sharp at any zoom.</p>
+            <p class="options-note auto-note">Palette mode reduces each PNG to the strength's colour count (256/128/32) and is lossy. Lossless mode keeps the original pixels and only applies OxiPNG; a file that does not get smaller is kept unchanged. SVG → PNG is available only in palette mode.</p>
           </div>
         </div>
 

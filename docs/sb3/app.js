@@ -21,7 +21,7 @@
         blocks_renamed: "block IDs renamed",
         vars_renamed: "variables renamed",
         lists_renamed: "lists renamed",
-        broadcasts_renamed: "broadcasts renamed",
+        broadcasts_renamed: "broadcast ids shortened",
         fields_removed: "default fields removed",
         monitors_updated: "monitors updated",
         vars_removed: "unused variables removed",
@@ -34,6 +34,7 @@
         broadcasts_removed: "unused broadcasts removed",
         procs_removed: "unused definitions removed",
         vars_initialized: "variable starting values blanked",
+        dead_assets_skipped: "dead-asset pass skipped (indirect references)",
         lists_initialized: "list starting values blanked",
         duplicates_extracted: "duplicate groups extracted",
         dup_blocks_saved: "blocks saved by duplicates",
@@ -123,7 +124,7 @@
         blocks_renamed: "ブロック ID を短縮",
         vars_renamed: "変数名を短縮",
         lists_renamed: "リスト名を短縮",
-        broadcasts_renamed: "ブロードキャスト名を短縮",
+        broadcasts_renamed: "ブロードキャストIDを短縮",
         fields_removed: "既定フィールドを削除",
         monitors_updated: "モニターを更新",
         vars_removed: "未使用の変数を削除",
@@ -136,6 +137,7 @@
         broadcasts_removed: "未使用のブロードキャストを削除",
         procs_removed: "未使用の定義を削除",
         vars_initialized: "変数の初期値を空に",
+        dead_assets_skipped: "動的な参照があるためアセット削除を中止",
         lists_initialized: "リストの初期値を空に",
         duplicates_extracted: "重複したコードを抽出",
         dup_blocks_saved: "重複で削減したブロック",
@@ -233,7 +235,7 @@
     freqIds: true,
     dropObscuredShadows: true,
     removeUnreachable: true,
-    clearInitialValues: true,
+    clearInitialValues: false,
     extractDuplicates: true,
     nearDuplicates: true,
     simplifyIfElse: true,
@@ -248,19 +250,18 @@
     removeDeadAssets: false,
     removeWriteOnly: false,
     normalizeTypes: false,
-    stripNullFieldIds: true,
+    stripNullFieldIds: false,
     zeroTopLevelCoords: false
   };
 
-  // Presets are cumulative: each stage keeps everything the previous one had
-  // and adds its own options. The last stage therefore leaves every pass on.
+  // Presets are cumulative. Maximum enables the careful asset/store cleanup
+  // but leaves value rewriting and field-shape normalization off.
   var PRESETS = (function () {
     var stages = [
       ["clean", []],
       ["safe", [
         "stripDefaults", "shortenIds", "freqIds",
-        "removeUnused", "dropObscuredShadows", "removeUnreachable",
-        "clearInitialValues"
+        "removeUnused", "dropObscuredShadows", "removeUnreachable"
       ]],
       ["cleanup", [
         "renameStores", "compressProcs", "removeNoops", "simplifyIfElse", "inlineSingleCall",
@@ -270,9 +271,8 @@
         "extractDuplicates", "nearDuplicates", "loopDuplicates", "reuseReporters"
       ]],
       ["max", [
-        "stripComments", "compactWorkspace", "removeMonitors",
-        "removeDeadAssets", "removeWriteOnly", "normalizeTypes",
-        "zeroTopLevelCoords"
+        "stripComments", "compactWorkspace", "removeMonitors", "zeroTopLevelCoords",
+        "removeDeadAssets", "removeWriteOnly"
       ]]
     ];
     var keys = [];
@@ -313,11 +313,12 @@
     "const_values_folded",
     "procs_inlined",
     "dead_costumes_removed", "dead_sounds_removed", "dead_sprites_removed",
+    "dead_assets_skipped",
     "writeonly_vars_removed", "writeonly_lists_removed",
     "md5ext_removed", "numeric_strings_normalized", "meta_agent_cleared"
   ];
 
-  var STORAGE_KEY = "sb3-compressor-options-v1";
+  var STORAGE_KEY = "sb3-compressor-options-v3";
 
   var el = {
     dropzone: document.getElementById("dropzone"),

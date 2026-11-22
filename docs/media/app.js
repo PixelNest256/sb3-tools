@@ -156,7 +156,7 @@
 
   var STRENGTH_KEY = "sb3-media-strength-v1";
   var MODE_KEY = "sb3-media-mode-v1";
-  var AUDIO_KEY = "sb3-media-audio-v1";
+  var AUDIO_KEY = "sb3-media-audio-v2";
 
   var el = {
     dropzone: document.getElementById("dropzone"),
@@ -171,7 +171,7 @@
     modeDesc: document.getElementById("modeDesc"),
     strengthWrap: document.getElementById("strengthWrap"),
     autoExtra: document.getElementById("autoExtra"),
-    optPngOptimize: document.getElementById("optPngOptimize"),
+    optPngMode: document.getElementById("optPngMode"),
     optSvgToPng: document.getElementById("optSvgToPng"),
     optMinPx: document.getElementById("optMinPx"),
     optWavMp3: document.getElementById("optWavMp3"),
@@ -269,13 +269,15 @@
 
   function readAudio() {
     var out = {
-      pngOptimize: false, svgToPng: true, minPx: true,
+      pngMode: "palette", svgToPng: true, minPx: true,
       wavToMp3: false, wavMp3Bitrate: 96, reencodeMp3: false, mp3Bitrate: 96
     };
     try {
       var s = JSON.parse(localStorage.getItem(AUDIO_KEY) || "null");
       if (s && typeof s === "object") {
-        out.pngOptimize = s.pngOptimize === true;
+        if (s.pngMode === "palette" || s.pngMode === "lossless" || s.pngMode === "keep") {
+          out.pngMode = s.pngMode;
+        }
         out.svgToPng = s.svgToPng !== false;
         out.minPx = s.minPx !== false;
         out.wavToMp3 = !!s.wavToMp3;
@@ -287,19 +289,29 @@
     return out;
   }
 
+  function syncPngModeUI() {
+    var palette = !el.optPngMode || el.optPngMode.value === "palette";
+    [el.optSvgToPng, el.optMinPx].forEach(function (control) {
+      if (!control) return;
+      control.disabled = !palette;
+      control.title = palette ? "" : "Only used when PNG mode is Palette.";
+    });
+  }
+
   function applyAudio(a) {
-    if (el.optPngOptimize) el.optPngOptimize.checked = a.pngOptimize === true;
+    if (el.optPngMode) el.optPngMode.value = a.pngMode || "palette";
     if (el.optSvgToPng) el.optSvgToPng.checked = a.svgToPng !== false;
     if (el.optMinPx) el.optMinPx.checked = a.minPx !== false;
     if (el.optWavMp3) el.optWavMp3.checked = !!a.wavToMp3;
     if (el.optMp3Reenc) el.optMp3Reenc.checked = !!a.reencodeMp3;
     if (el.wavMp3Bitrate) el.wavMp3Bitrate.value = String(a.wavMp3Bitrate);
     if (el.mp3Bitrate) el.mp3Bitrate.value = String(a.mp3Bitrate);
+    syncPngModeUI();
   }
 
   function saveAudio() {
     var a = {
-      pngOptimize: !!(el.optPngOptimize && el.optPngOptimize.checked),
+      pngMode: el.optPngMode ? el.optPngMode.value : "palette",
       svgToPng: !(el.optSvgToPng && !el.optSvgToPng.checked),
       minPx: !(el.optMinPx && !el.optMinPx.checked),
       wavToMp3: !!(el.optWavMp3 && el.optWavMp3.checked),
@@ -311,6 +323,7 @@
   }
 
   function onAudioChange() {
+    syncPngModeUI();
     saveAudio();
     if (mode === "auto" && scan) startCompression();
     else markStale();
@@ -1044,7 +1057,11 @@
 
     var options = { mode: mode, strength: strength };
     if (mode === "auto") {
-      options.pngOptimize = !(el.optPngOptimize && !el.optPngOptimize.checked);
+      var pngMode = el.optPngMode ? el.optPngMode.value : "palette";
+      options.pngMode = pngMode;
+      options.pngPalette = pngMode === "palette";
+      options.pngOptimize = false;
+      options.pngLossless = pngMode === "lossless";
       options.svgToPng = !(el.optSvgToPng && !el.optSvgToPng.checked);
       options.minPx = !(el.optMinPx && !el.optMinPx.checked);
       options.wavToMp3 = !!(el.optWavMp3 && el.optWavMp3.checked);
@@ -1284,7 +1301,7 @@
     });
   });
 
-  [el.optPngOptimize, el.optSvgToPng, el.optMinPx, el.optWavMp3, el.wavMp3Bitrate, el.optMp3Reenc, el.mp3Bitrate].forEach(function (control) {
+  [el.optPngMode, el.optSvgToPng, el.optMinPx, el.optWavMp3, el.wavMp3Bitrate, el.optMp3Reenc, el.mp3Bitrate].forEach(function (control) {
     if (control) control.addEventListener("change", onAudioChange);
   });
 
@@ -1303,7 +1320,7 @@
       b.setAttribute("aria-pressed", String(b.getAttribute("data-strength") === strength));
     });
     applyAudio({
-      pngOptimize: false, svgToPng: true, minPx: true,
+      pngMode: "palette", svgToPng: true, minPx: true,
       wavToMp3: false, reencodeMp3: false, wavMp3Bitrate: 96, mp3Bitrate: 96
     });
     saveAudio();

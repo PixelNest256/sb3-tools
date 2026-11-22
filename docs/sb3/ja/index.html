@@ -119,7 +119,7 @@
             <button type="button" class="preset-btn" data-preset="safe" aria-pressed="false" title="内部 ID、未使用の変数、到達しないコード、隠れた既定値を削除。名前は変えません。">見た目変化なし</button>
             <button type="button" class="preset-btn" data-preset="cleanup" aria-pressed="false" title="名前の短縮、何もしないブロックの削除、if-else の簡略化、1回だけの定義の展開、定数の畳み込みも行います。">コードクリーンアップ</button>
             <button type="button" class="preset-btn" data-preset="optimize" aria-pressed="true" title="繰り返すコードの抽出、似たコードの統合、繰り返しのループ化も行います。">コード最適化</button>
-            <button type="button" class="preset-btn" data-preset="max" aria-pressed="false" title="非表示モニターの削除、コメントの削除、ブロック配置の再構成を含む、すべてのオプション。">最大</button>
+            <button type="button" class="preset-btn" data-preset="max" aria-pressed="false" title="最適化に加えて、安全条件を満たす範囲でアセットと書き込み専用ストアを削除する。保存値の書き換えやフィールド形の変更はオフ。">最大</button>
             <span class="preset-custom" id="presetCustom" role="status" hidden>カスタム</span>
           </div>
         </div>
@@ -129,13 +129,10 @@
             <legend>容量を削る</legend>
             <label class="opt"><input type="checkbox" checked data-opt="stripDefaults"><span>Scratch が復元する値を削除</span></label>
             <label class="opt"><input type="checkbox" checked data-opt="removeUnused"><span>未使用の変数とリストを削除</span></label>
-            <label class="opt"><input type="checkbox" checked data-opt="clearInitialValues"><span>上書きされる初期値を空にする</span></label>
             <label class="opt"><input type="checkbox" checked data-opt="dropObscuredShadows"><span>隠れた入力の既定値を削除</span></label>
             <label class="opt"><input type="checkbox" checked data-opt="removeUnreachable"><span>実行されないコードを削除</span></label>
-            <label class="opt"><input type="checkbox" data-opt="removeDeadAssets"><span>未使用のアセットを削除（コスチューム・サウンド・スプライト）</span></label>
-            <label class="opt"><input type="checkbox" data-opt="removeWriteOnly"><span>書き込み専用の変数とリストを削除</span></label>
-            <label class="opt"><input type="checkbox" data-opt="normalizeTypes"><span>型と表現を正規化</span></label>
-            <label class="opt"><input type="checkbox" checked data-opt="stripNullFieldIds"><span>null のフィールドIDを削除</span></label>
+            <label class="opt" title="すべてのコスチューム・サウンド・スプライト参照が直接わかる値のときだけ実行し、動的な参照があればアセットを削除しません。"><input type="checkbox" data-opt="removeDeadAssets"><span>未使用アセットを削除（直接参照のみ）</span></label>
+            <label class="opt" title="書き込まれるだけで読まれない変数・リストを削除します。ID と名前の両方で参照を解決します。"><input type="checkbox" data-opt="removeWriteOnly"><span>書き込み専用の変数とリストを削除</span></label>
             <label class="opt"><input type="checkbox" data-opt="zeroTopLevelCoords"><span>最上位ブロックの座標を0に</span></label>
             <label class="opt"><input type="checkbox" data-opt="stripComments"><span>すべてのコメントを削除（内容は失われます）</span></label>
           </fieldset>
@@ -155,12 +152,20 @@
           <fieldset class="opt-group">
             <legend>名前と定数</legend>
             <label class="opt"><input type="checkbox" checked data-opt="shortenIds"><span>内部 ID を短縮</span></label>
-            <label class="opt" title="内部 ID の短縮がオンのときだけ、名前も変わります。"><input type="checkbox" checked data-opt="renameStores"><span>変数・リスト・メッセージ名も短縮</span></label>
+            <label class="opt" title="内部 ID の短縮がオンのときだけ、名前も変わります。"><input type="checkbox" checked data-opt="renameStores"><span>変数・リスト名も短縮</span></label>
             <label class="opt"><input type="checkbox" checked data-opt="freqIds"><span>頻出ブロックを短い ID に</span></label>
             <label class="opt"><input type="checkbox" checked data-opt="compressProcs"><span>カスタムブロック名を短縮</span></label>
             <label class="opt"><input type="checkbox" checked data-opt="foldConstants"><span>定数計算を畳み込む</span></label>
             <label class="opt"><input type="checkbox" checked data-opt="propagateConstants"><span>定数変数を値に置換</span></label>
             <label class="opt" title="非表示のモニターを削除し、その変数・リストを名前短縮や削除の対象にします。表示中のモニターは残ります（保存値は消去）。"><input type="checkbox" data-opt="removeMonitors"><span>モニターと位置を保持しない</span></label>
+          </fieldset>
+
+          <fieldset class="opt-group opt-group--danger">
+            <legend>危険</legend>
+            <p class="danger-note">保存値やフィールドの形を書き換えます。最大プリセットではオフです。必要な場合だけオンにして、動作を確認してください。</p>
+            <label class="opt"><input type="checkbox" data-opt="clearInitialValues"><span>上書きされる初期値を空にする</span></label>
+            <label class="opt"><input type="checkbox" data-opt="normalizeTypes"><span>型と表現を正規化</span></label>
+            <label class="opt"><input type="checkbox" data-opt="stripNullFieldIds"><span>null のフィールドIDを削除</span></label>
           </fieldset>
         </div>
 

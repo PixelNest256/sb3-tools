@@ -37,9 +37,11 @@
   ];
 
   // The full compressor has a second group of boolean media options.  The
-  // project compressor uses only PROJECT_OPTION_KEYS.
+  // project compressor uses only PROJECT_OPTION_KEYS.  New flags are appended
+  // so existing watermark bit positions stay readable.
   const MEDIA_OPTION_KEYS = [
-    "pngOptimize", "svgToPng", "minPx", "wavToMp3", "reencodeMp3"
+    "pngOptimize", "svgToPng", "minPx", "wavToMp3", "reencodeMp3",
+    "pngPalette", "pngLossless"
   ];
 
   function isDict(value) {

@@ -119,7 +119,7 @@
             <button type="button" class="preset-btn" data-preset="safe" aria-pressed="false" title="Internal IDs, unused stores, unreachable code, and hidden defaults. Names stay as they are.">No visible change</button>
             <button type="button" class="preset-btn" data-preset="cleanup" aria-pressed="false" title="Also shorten names, remove do-nothing blocks, simplify if-else, inline single-use definitions, and fold constants.">Code cleanup</button>
             <button type="button" class="preset-btn" data-preset="optimize" aria-pressed="true" title="Also extract repeated code, merge similar code, and turn repeated runs into loops.">Code optimization</button>
-            <button type="button" class="preset-btn" data-preset="max" aria-pressed="false" title="Every option, including hidden-monitor removal, comment removal, and re-flowing the workspace.">Maximum</button>
+            <button type="button" class="preset-btn" data-preset="max" aria-pressed="false" title="Editor cleanup plus careful asset/store cleanup. Value rewriting and field-shape changes stay off.">Maximum</button>
             <span class="preset-custom" id="presetCustom" role="status" hidden>Custom</span>
           </div>
         </div>
@@ -129,13 +129,10 @@
             <legend>Reclaim space</legend>
             <label class="opt"><input type="checkbox" checked data-opt="stripDefaults"><span>Remove values Scratch restores</span></label>
             <label class="opt"><input type="checkbox" checked data-opt="removeUnused"><span>Remove unused variables and lists</span></label>
-            <label class="opt"><input type="checkbox" checked data-opt="clearInitialValues"><span>Clear overwritten starting values</span></label>
             <label class="opt"><input type="checkbox" checked data-opt="dropObscuredShadows"><span>Drop hidden input defaults</span></label>
             <label class="opt"><input type="checkbox" checked data-opt="removeUnreachable"><span>Remove code that never runs</span></label>
-            <label class="opt"><input type="checkbox" data-opt="removeDeadAssets"><span>Remove dead assets (unused costumes, sounds, sprites)</span></label>
-            <label class="opt"><input type="checkbox" data-opt="removeWriteOnly"><span>Remove write-only variables and lists</span></label>
-            <label class="opt"><input type="checkbox" data-opt="normalizeTypes"><span>Normalize types and representations</span></label>
-            <label class="opt"><input type="checkbox" checked data-opt="stripNullFieldIds"><span>Strip null field IDs</span></label>
+            <label class="opt" title="Only runs when every costume, sound, and sprite reference is a literal, directly known value; otherwise no assets are removed."><input type="checkbox" data-opt="removeDeadAssets"><span>Remove dead assets (direct references only)</span></label>
+            <label class="opt" title="Removes variables and lists that are written but never read, resolving references by id and by name."><input type="checkbox" data-opt="removeWriteOnly"><span>Remove write-only variables and lists</span></label>
             <label class="opt"><input type="checkbox" data-opt="zeroTopLevelCoords"><span>Zero top-level block coordinates</span></label>
             <label class="opt"><input type="checkbox" data-opt="stripComments"><span>Remove all comments (their text is lost)</span></label>
           </fieldset>
@@ -155,12 +152,20 @@
           <fieldset class="opt-group">
             <legend>Rename &amp; fold</legend>
             <label class="opt"><input type="checkbox" checked data-opt="shortenIds"><span>Shorten internal IDs</span></label>
-            <label class="opt" title="Names change only while internal IDs are also shortened."><input type="checkbox" checked data-opt="renameStores"><span>Shorten variable, list, and message names</span></label>
+            <label class="opt" title="Names change only while internal IDs are also shortened."><input type="checkbox" checked data-opt="renameStores"><span>Shorten variable and list names</span></label>
             <label class="opt"><input type="checkbox" checked data-opt="freqIds"><span>Give frequent blocks shorter IDs</span></label>
             <label class="opt"><input type="checkbox" checked data-opt="compressProcs"><span>Shorten custom block names</span></label>
             <label class="opt"><input type="checkbox" checked data-opt="foldConstants"><span>Calculate constant math</span></label>
             <label class="opt"><input type="checkbox" checked data-opt="propagateConstants"><span>Replace constant variables with values</span></label>
             <label class="opt" title="Deletes hidden monitors so their variables and lists can be shortened or removed. Visible monitors stay; their saved values are cleared."><input type="checkbox" data-opt="removeMonitors"><span>Don't keep monitors and their positions</span></label>
+          </fieldset>
+
+          <fieldset class="opt-group opt-group--danger">
+            <legend>Risky</legend>
+            <p class="danger-note">These passes rewrite stored values or field shapes. They stay off in Maximum; enable one only if you can test the result.</p>
+            <label class="opt"><input type="checkbox" data-opt="clearInitialValues"><span>Clear overwritten starting values</span></label>
+            <label class="opt"><input type="checkbox" data-opt="normalizeTypes"><span>Normalize types and representations</span></label>
+            <label class="opt"><input type="checkbox" data-opt="stripNullFieldIds"><span>Strip null field IDs</span></label>
           </fieldset>
         </div>
 

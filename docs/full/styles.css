@@ -587,6 +587,28 @@ h1 {
   color: var(--ink-soft);
 }
 
+.opt-group--danger {
+  grid-column: 1 / -1;
+  margin-top: 0;
+  padding: 8px 10px 6px;
+  border: 1px solid rgba(225, 75, 18, 0.5);
+  background: var(--warn-bg);
+}
+.opt-group--danger legend {
+  margin-bottom: 5px;
+  padding-bottom: 4px;
+  border-bottom-color: rgba(225, 75, 18, 0.35);
+  color: var(--signal-dark);
+}
+.danger-note {
+  max-width: 82ch;
+  margin: 0 0 3px;
+  padding: 0;
+  font-size: 13px;
+  line-height: 1.3;
+  color: inherit;
+}
+
 .opt {
   display: grid;
   grid-template-columns: 14px minmax(0, 1fr);
@@ -651,6 +673,63 @@ h1 {
   font-size: 11px;
   line-height: 1.5;
   color: var(--ink-soft);
+}
+
+/* ------------------------------------------------------------- presets */
+
+.preset-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 8px 10px;
+  margin-top: 14px;
+}
+.preset-label {
+  font-family: var(--mono);
+  font-size: 8px;
+  font-weight: 500;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--ink-soft);
+}
+.preset-list {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+.preset-btn {
+  appearance: none;
+  margin: 0;
+  padding: 4px 9px;
+  border: 1px solid var(--rule);
+  border-radius: 0;
+  background: transparent;
+  color: var(--ink);
+  font-family: var(--mono);
+  font-size: 10px;
+  line-height: 1.35;
+  letter-spacing: 0.03em;
+  cursor: pointer;
+}
+.preset-btn:hover {
+  border-color: var(--ink);
+  background: var(--drop-bg-hover);
+}
+.preset-btn:focus-visible { outline: 2px solid var(--signal); outline-offset: 2px; }
+.preset-btn[aria-pressed="true"] {
+  border-color: var(--ink);
+  background: var(--ink);
+  color: var(--paper);
+}
+.preset-custom {
+  padding: 4px 9px;
+  border: 1px dashed var(--signal);
+  color: var(--signal-dark);
+  font-family: var(--mono);
+  font-size: 10px;
+  line-height: 1.35;
+  letter-spacing: 0.03em;
 }
 
 /* ------------------------------------------------------------- notes */
@@ -1069,9 +1148,19 @@ html[lang="ja"] .text-btn { font-size: 10px; letter-spacing: 0.02em; }
 
 html[lang="ja"] .opt-group legend { font-size: 9px; letter-spacing: 0.06em; }
 html[lang="ja"] .opt { font-size: 13px; line-height: 1.5; }
+html[lang="ja"] .danger-note { font-size: 13px; line-height: 1.5; }
 html[lang="ja"] .opt-warn { font-size: 13px; }
 html[lang="ja"] .tag { font-size: 9px; letter-spacing: 0.03em; }
 html[lang="ja"] .options-note { font-size: 12px; line-height: 1.75; }
+html[lang="ja"] .preset-label { font-size: 9px; letter-spacing: 0.06em; }
+html[lang="ja"] .preset-btn,
+html[lang="ja"] .preset-custom {
+  padding: 5px 9px;
+  font-family: var(--jp);
+  font-size: 11px;
+  line-height: 1.35;
+  letter-spacing: 0;
+}
 
 html[lang="ja"] .notes summary { font-size: 13px; }
 html[lang="ja"] .notes-body { font-size: 13px; line-height: 1.85; }

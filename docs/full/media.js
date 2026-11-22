@@ -4,7 +4,7 @@
  * server, no upload.
  *
  * Codecs (vendored under vendor/, loaded lazily):
- *   images : PNG  -> palette quantisation (own writer) + OxiPNG lossless pass
+ *   images : PNG  -> palette quantisation (own writer), or lossless OxiPNG
  *            JPEG -> MozJPEG (WASM)
  *   vector : SVG  -> SVGO
  *   audio  : WAV  -> windowed-sinc resample, PCM re-encode, or MP3 transcode
@@ -1346,12 +1346,31 @@
 
   function presetFor(strength) { return PRESETS[strength] || PRESETS.balanced; }
 
+  // "palette" is lossy, "lossless" only runs OxiPNG on the original PNG, and
+  // "keep" leaves the file alone.  Explicit booleans remain for old callers.
+  function pngModeOf(o) {
+    const opts = o || {};
+    if (opts.pngMode === "palette" || opts.pngMode === "lossless" || opts.pngMode === "keep") {
+      return opts.pngMode;
+    }
+    if (opts.pngLossless === true) return "lossless";
+    if (opts.pngPalette === false) {
+      return opts.pngOptimize === true ? "lossless" : "keep";
+    }
+    return "palette";
+  }
+
   function autoSetting(asset, preset, opts) {
     const o = opts || {};
+    const mode = pngModeOf(o);
     if (asset.kind === "image") {
       if (asset.ext === "png") {
+        if (mode === "keep") return { method: "keep" };
+        if (mode === "lossless") return { method: "pnglossless", level: 3 };
         const png = { ...preset.png };
-        if (o.pngOptimize === false) png.oxilevel = 0;
+        // Palette mode is lossy.  OxiPNG after it is only kept for callers
+        // that still pass the old pngOptimize flag without pngMode.
+        png.oxilevel = !o.pngMode && o.pngOptimize !== false ? preset.png.oxilevel : 0;
         return { method: "png", ...png };
       }
       if (asset.ext === "jpg" || asset.ext === "jpeg") return { method: "jpeg", ...preset.jpeg };
@@ -1360,10 +1379,13 @@
     if (asset.kind === "vector") {
       return {
         method: "svg", level: preset.svg,
-        toPng: o.svgToPng !== false,
+        // Rasterising an SVG uses palette compression, so only palette mode
+        // may replace the vector.  Lossless/keep modes keep it vector.
+        toPng: mode === "palette" && o.svgToPng !== false,
         minPx: o.minPx !== false,
         pngColors: preset.png.colors,
-        pngOxilevel: o.pngOptimize === false ? 0 : preset.png.oxilevel
+        pngOxilevel: mode === "palette" && !o.pngMode && o.pngOptimize !== false
+          ? preset.png.oxilevel : 0
       };
     }
     if (asset.kind === "wav") {

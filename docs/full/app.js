@@ -48,6 +48,7 @@
       hideList: "Hide list",
       keptOriginal: "kept original",
       optionsReset: "Options reset.",
+      presetApplied: "Preset applied: {name}. Run again to apply it.",
       threadsNote: "({n} parallel workers)",
       projectLine: "project.json {from} → {to}",
       mediaLine: "media {from} → {to}",
@@ -64,7 +65,7 @@
         blocks_renamed: "block IDs renamed",
         vars_renamed: "variables renamed",
         lists_renamed: "lists renamed",
-        broadcasts_renamed: "broadcasts renamed",
+        broadcasts_renamed: "broadcast ids shortened",
         fields_removed: "default fields removed",
         monitors_updated: "monitors updated",
         vars_removed: "unused variables removed",
@@ -77,6 +78,7 @@
         broadcasts_removed: "unused broadcasts removed",
         procs_removed: "unused definitions removed",
         vars_initialized: "variable starting values blanked",
+        dead_assets_skipped: "dead-asset pass skipped (indirect references)",
         lists_initialized: "list starting values blanked",
         duplicates_extracted: "duplicate groups extracted",
         dup_blocks_saved: "blocks saved by duplicates",
@@ -149,6 +151,7 @@
       hideList: "一覧を隠す",
       keptOriginal: "そのまま",
       optionsReset: "設定を初期値に戻しました。",
+      presetApplied: "プリセット「{name}」を適用しました。再実行すると反映されます。",
       threadsNote: "（並列 {n}）",
       projectLine: "project.json {from} → {to}",
       mediaLine: "メディア {from} → {to}",
@@ -165,7 +168,7 @@
         blocks_renamed: "ブロック ID を短縮",
         vars_renamed: "変数名を短縮",
         lists_renamed: "リスト名を短縮",
-        broadcasts_renamed: "ブロードキャスト名を短縮",
+        broadcasts_renamed: "ブロードキャストIDを短縮",
         fields_removed: "既定フィールドを削除",
         monitors_updated: "モニターを更新",
         vars_removed: "未使用の変数を削除",
@@ -178,6 +181,7 @@
         broadcasts_removed: "未使用のブロードキャストを削除",
         procs_removed: "未使用の定義を削除",
         vars_initialized: "変数の初期値を空に",
+        dead_assets_skipped: "動的な参照があるためアセット削除を中止",
         lists_initialized: "リストの初期値を空に",
         duplicates_extracted: "重複したコードを抽出",
         dup_blocks_saved: "重複で削減したブロック",
@@ -233,9 +237,40 @@
     "removeDeadAssets", "removeWriteOnly", "normalizeTypes",
     "stripNullFieldIds", "zeroTopLevelCoords", "stripComments"
   ];
-  var PROJECT_KEY = "sb3-full-project-v1";
-  var MEDIA_KEY = "sb3-full-media-v1";
+  var PROJECT_KEY = "sb3-full-project-v3";
+  var MEDIA_KEY = "sb3-full-media-v2";
   var THEME_KEY = "sb3-full-theme-v1";
+
+  // The project-data presets match the /sb3/ page.  Media options are kept
+  // outside them: a preset changes how project.json is rewritten, not how
+  // costumes and sounds are encoded.
+  var PRESETS = (function () {
+    var stages = [
+      ["clean", []],
+      ["safe", [
+        "stripDefaults", "shortenIds", "freqIds",
+        "removeUnused", "dropObscuredShadows", "removeUnreachable"
+      ]],
+      ["cleanup", [
+        "renameStores", "compressProcs", "removeNoops", "simplifyIfElse", "inlineSingleCall",
+        "foldConstants", "propagateConstants"
+      ]],
+      ["optimize", [
+        "extractDuplicates", "nearDuplicates", "loopDuplicates", "reuseReporters"
+      ]],
+      ["max", [
+        "stripComments", "compactWorkspace", "removeMonitors", "zeroTopLevelCoords",
+        "removeDeadAssets", "removeWriteOnly"
+      ]]
+    ];
+    var keys = [];
+    var out = [];
+    stages.forEach(function (stage) {
+      keys = keys.concat(stage[1]);
+      out.push({ id: stage[0], keys: keys });
+    });
+    return out;
+  })();
 
   var el = {
     dropzone: document.getElementById("dropzone"),
@@ -245,9 +280,10 @@
     fileSize: document.getElementById("fileSize"),
     clearBtn: document.getElementById("clearBtn"),
     resetOptions: document.getElementById("resetOptions"),
+    presetCustom: document.getElementById("presetCustom"),
     strengthWrap: document.getElementById("strengthWrap"),
     autoExtra: document.getElementById("autoExtra"),
-    optPngOptimize: document.getElementById("optPngOptimize"),
+    optPngMode: document.getElementById("optPngMode"),
     optSvgToPng: document.getElementById("optSvgToPng"),
     optMinPx: document.getElementById("optMinPx"),
     optWavMp3: document.getElementById("optWavMp3"),
@@ -291,6 +327,7 @@
   };
 
   var projectInputs = Array.prototype.slice.call(document.querySelectorAll("input[data-popt]"));
+  var presetButtons = Array.prototype.slice.call(document.querySelectorAll("button[data-preset]"));
   var strengthButtons = Array.prototype.slice.call(document.querySelectorAll("button[data-strength]"));
   var themeButtons = Array.prototype.slice.call(document.querySelectorAll("button[data-theme-set]"));
 
@@ -351,10 +388,12 @@
   function defaultProjectOptions() {
     var out = {};
     PROJECT_KEYS.forEach(function (key) { out[key] = true; });
-    // The full page has no presets: dropping hidden monitors stays opt-in,
-    // matching the non-maximum presets on /sb3/.
+    // The full page keeps the same project-data defaults as the non-maximum
+    // presets on /sb3/: hidden-monitor, asset, and risky passes stay opt-in.
     out.removeMonitors = false;
     out.removeDeadAssets = false;
+    out.clearInitialValues = false;
+    out.stripNullFieldIds = false;
     out.removeWriteOnly = false;
     out.normalizeTypes = false;
     out.zeroTopLevelCoords = false;
@@ -362,15 +401,64 @@
     return out;
   }
 
+  function presetValues(keys) {
+    var wanted = {};
+    keys.forEach(function (key) { wanted[key] = true; });
+    var out = {};
+    projectInputs.forEach(function (input) {
+      var key = input.getAttribute("data-popt");
+      out[key] = wanted[key] === true;
+    });
+    return out;
+  }
+
+  function sameOptions(a, b) {
+    return Object.keys(a).every(function (key) {
+      return (a[key] === true) === (b[key] === true);
+    });
+  }
+
+  function activePreset() {
+    var current = readProjectOptions();
+    for (var i = 0; i < PRESETS.length; i++) {
+      if (sameOptions(presetValues(PRESETS[i].keys), current)) return PRESETS[i].id;
+    }
+    return "";
+  }
+
+  function updatePresetUI() {
+    var active = activePreset();
+    presetButtons.forEach(function (button) {
+      button.setAttribute("aria-pressed", String(button.getAttribute("data-preset") === active));
+    });
+    if (el.presetCustom) el.presetCustom.hidden = !!active;
+  }
+
+  function applyPreset(button) {
+    var id = button.getAttribute("data-preset");
+    var preset = null;
+    PRESETS.forEach(function (candidate) {
+      if (candidate.id === id) preset = candidate;
+    });
+    if (!preset) return;
+    applyProjectOptions(presetValues(preset.keys));
+    updatePresetUI();
+    saveJSON(PROJECT_KEY, readProjectOptions());
+    setMessage(fmt(L.presetApplied, { name: (button.textContent || "").trim() }), false);
+    if (running) staleAfterRun = true; else markStale();
+  }
+
   function readMediaOptions() {
     var out = {
-      pngOptimize: false, svgToPng: true, minPx: true,
+      pngMode: "palette", svgToPng: true, minPx: true,
       wavToMp3: false, wavMp3Bitrate: 96, reencodeMp3: false, mp3Bitrate: 96
     };
     try {
       var s = JSON.parse(localStorage.getItem(MEDIA_KEY) || "null");
       if (s && typeof s === "object") {
-        out.pngOptimize = s.pngOptimize === true;
+        if (s.pngMode === "palette" || s.pngMode === "lossless" || s.pngMode === "keep") {
+          out.pngMode = s.pngMode;
+        }
         out.svgToPng = s.svgToPng !== false;
         out.minPx = s.minPx !== false;
         out.wavToMp3 = !!s.wavToMp3;
@@ -381,18 +469,27 @@
     } catch (_) { /* ignore */ }
     return out;
   }
+  function syncPngModeUI() {
+    var palette = !el.optPngMode || el.optPngMode.value === "palette";
+    [el.optSvgToPng, el.optMinPx].forEach(function (control) {
+      if (!control) return;
+      control.disabled = !palette;
+      control.title = palette ? "" : "Only used when PNG mode is Palette.";
+    });
+  }
   function applyMediaOptions(a) {
-    if (el.optPngOptimize) el.optPngOptimize.checked = a.pngOptimize === true;
+    if (el.optPngMode) el.optPngMode.value = a.pngMode || "palette";
     if (el.optSvgToPng) el.optSvgToPng.checked = a.svgToPng !== false;
     if (el.optMinPx) el.optMinPx.checked = a.minPx !== false;
     if (el.optWavMp3) el.optWavMp3.checked = !!a.wavToMp3;
     if (el.optMp3Reenc) el.optMp3Reenc.checked = !!a.reencodeMp3;
     if (el.wavMp3Bitrate) el.wavMp3Bitrate.value = String(a.wavMp3Bitrate);
     if (el.mp3Bitrate) el.mp3Bitrate.value = String(a.mp3Bitrate);
+    syncPngModeUI();
   }
   function saveMediaOptions() {
     saveJSON(MEDIA_KEY, {
-      pngOptimize: !!(el.optPngOptimize && el.optPngOptimize.checked),
+      pngMode: el.optPngMode ? el.optPngMode.value : "palette",
       svgToPng: !(el.optSvgToPng && !el.optSvgToPng.checked),
       minPx: !(el.optMinPx && !el.optMinPx.checked),
       wavToMp3: !!(el.optWavMp3 && el.optWavMp3.checked),
@@ -742,7 +839,11 @@
     return {
       media: {
         mode: "auto", strength: strength,
-        pngOptimize: media.pngOptimize, svgToPng: media.svgToPng, minPx: media.minPx,
+        pngMode: media.pngMode,
+        pngPalette: media.pngMode === "palette",
+        pngOptimize: false,
+        pngLossless: media.pngMode === "lossless",
+        svgToPng: media.svgToPng, minPx: media.minPx,
         wavToMp3: media.wavToMp3,
         wavMp3Bitrate: media.wavMp3Bitrate, reencodeMp3: media.reencodeMp3,
         mp3Bitrate: media.mp3Bitrate
@@ -971,8 +1072,9 @@
     });
   });
 
-  [el.optPngOptimize, el.optSvgToPng, el.optMinPx, el.optWavMp3, el.wavMp3Bitrate, el.optMp3Reenc, el.mp3Bitrate].forEach(function (control) {
+  [el.optPngMode, el.optSvgToPng, el.optMinPx, el.optWavMp3, el.wavMp3Bitrate, el.optMp3Reenc, el.mp3Bitrate].forEach(function (control) {
     if (control) control.addEventListener("change", function () {
+      if (control === el.optPngMode) syncPngModeUI();
       saveMediaOptions();
       
       if (running) staleAfterRun = true; else markStale();
@@ -981,9 +1083,14 @@
 
   projectInputs.forEach(function (input) {
     input.addEventListener("change", function () {
+      updatePresetUI();
       saveJSON(PROJECT_KEY, readProjectOptions());
       if (running) staleAfterRun = true; else markStale();
     });
+  });
+
+  presetButtons.forEach(function (button) {
+    button.addEventListener("click", function () { applyPreset(button); });
   });
 
   themeButtons.forEach(function (button) {
@@ -997,9 +1104,10 @@
     });
     applyProjectOptions(defaultProjectOptions());
     applyMediaOptions({
-      pngOptimize: false, svgToPng: true, minPx: true,
+      pngMode: "palette", svgToPng: true, minPx: true,
       wavToMp3: false, reencodeMp3: false, wavMp3Bitrate: 96, mp3Bitrate: 96
     });
+    updatePresetUI();
     saveJSON(PROJECT_KEY, readProjectOptions());
     saveMediaOptions();
     saveJSON(MEDIA_KEY, Object.assign(readMediaOptions(), { strength: strength }));
@@ -1050,5 +1158,6 @@
   applyMediaOptions(mediaStored);
   var projectStored = loadJSON(PROJECT_KEY, null);
   applyProjectOptions(projectStored ? Object.assign(defaultProjectOptions(), projectStored) : defaultProjectOptions());
+  updatePresetUI();
   resetReadout();
 })();

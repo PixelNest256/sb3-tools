@@ -30,9 +30,11 @@ Each tool has an English page and a Japanese page (`…/ja/`). Use `docs/sb3/`,
 
 ### Project pass — `project.json` (behavior-preserving)
 
-- **Rename** block IDs to short generated IDs. Variable, list, and message
-  names, plus custom-block proccodes and arguments, are only shortened when the
+- **Rename** block IDs to short generated IDs. Variable and list names,
+  plus custom-block proccodes and arguments, are only shortened when the
   matching option is on — with just IDs shortened, every name stays as it was.
+  Message display names are always kept: a send may omit its id and the VM
+  then matches the receiver by name.
   Store IDs are numbered once across the whole project: a sprite resolves an ID
   in its own map first and then on the stage, so reusing an ID between two
   targets would silently retarget one of them. Names are numbered per scope
@@ -65,21 +67,32 @@ Each tool has an English page and a Japanese page (`…/ja/`). Use `docs/sb3/`,
 - **Fold** constant arithmetic and propagate stores that never change.
 - **Minify** the JSON and repack the zip.
 
-The `/sb3/` page groups these passes into presets — **JSON cleanup only**,
-**No visible change**, **Code cleanup**, **Code optimization**, and **Maximum** —
-and switches to **Custom** as soon as an individual option is changed.
+The `/sb3/` page and the project-data section of `/full/` group these passes
+into presets — **JSON cleanup only**, **No visible change**, **Code cleanup**,
+**Code optimization**, and **Maximum** — and switch to **Custom** as soon as an
+individual option is changed. On `/full/`, a preset changes only the project
+data; the separate media strength stays as selected.
+
+**Maximum** also enables dead-asset and write-only-store removal, but with a
+safety gate: dead assets are removed only when every costume, sound, and sprite
+reference is a literal, directly known value; a computed name or an index skips
+the whole asset pass. Write-only removal resolves both explicit IDs and
+name-only fields, and tracks variables and lists separately when they share an
+ID. Starting-value clearing, type normalization, and null-field-ID stripping
+stay off even in Maximum; they live in the **Risky** group, which explains that
+they rewrite stored data or field shapes and should be tested before use.
 
 Every pass is kept only when the serialized JSON actually gets smaller, and the
 markers the Scratch VM relies on (an explicit `parent: null` and an
 end-of-stack `next: null`) are preserved.
 
-### Media pass — costumes and sounds (lossy)
+### Media pass — costumes and sounds
 
 | Asset | Treatment |
 | --- | --- |
-| PNG | Palette quantisation (2–256 colours, optional dithering) written as an indexed PNG, then a lossless **OxiPNG** pass. Transparency is preserved. |
+| PNG | **Palette** quantises to 2–256 colours (optional dithering) and writes an indexed PNG; it is lossy. **Lossless (OxiPNG)** leaves the pixels untouched and keeps the original when OxiPNG cannot shrink it. **Keep original** copies the PNG. Transparency is preserved. |
 | JPEG | **MozJPEG** re-encode at a chosen quality. Pixel dimensions never change, so rotation centres stay valid. |
-| SVG | **SVGO** optimisation, and optionally a palette **PNG** at the same pixel size when the PNG is smaller. Art whose width or height is under 1px is rasterised at 1px, so the PNG is never zero-sized. |
+| SVG | **SVGO** optimisation, and in **Palette** mode optionally a palette **PNG** at the same pixel size when the PNG is smaller. Art whose width or height is under 1px is rasterised at 1px, so the PNG is never zero-sized. |
 | WAV | Band-limited resampling, optional mono downmix, or transcoding to **MP3**. |
 | MP3 | ID3 tag stripping, or re-encode at a lower bitrate (mpg123 → LAME). |
 
@@ -144,7 +157,7 @@ The payload is JSON with `s` (schema), `k` (`project`, `media`, or `full`),
 option bits), and, for the media/full passes, `m` (media option bits). Option
 bits are packed least-significant-bit first in the fixed key order exported by
 `docs/watermark.js`; the project pass has 26 flags and the media/full passes
-add 5 media flags. The checker decodes both groups.
+add 7 media flags. The checker decodes both groups.
 
 Changing the SVG bytes changes its MD5, so the compressor updates the
 `assetId`/`md5ext` of every costume that shared the old asset. An existing
@@ -257,15 +270,16 @@ GitHub Pages is set to **Deploy from a branch → `main` / `docs`**. Push to
 
 ## Notes & caveats
 
-- **Media compression is lossy and irreversible.** Always keep a copy of the
-  original `.sb3`. The project pass is one-way too: original IDs and names are
-  not recoverable from the output. SVG→PNG is on by default and reduces a vector
-  costume to a palette PNG at its current pixel size — turn it off to keep
-  vector art crisp at any zoom.
+- **Palette PNG compression is lossy and irreversible.** Always keep a copy of
+  the original `.sb3`. The project pass is one-way too: original IDs and names
+  are not recoverable from the output. SVG→PNG is available only in PNG
+  **Palette** mode and reduces a vector costume to a palette PNG at its current
+  pixel size — turn it off to keep vector art crisp at any zoom.
 - Scratch's upload limits are 5 MB for `project.json` and 10 MB per asset; the
   analyzer flags anything over those. There is no limit on the number of assets.
-- The PNG lossless pass (OxiPNG) is the slowest step and is off by default; the
-  toggle trades a little speed for roughly 10% smaller PNGs.
+- **Lossless (OxiPNG)** is the slowest PNG mode. It never quantises colours and
+  keeps the original PNG when optimization does not make it smaller. Use it when
+  image pixels must remain unchanged.
 - Audio: Scratch only plays WAV and MP3, so WAV is either resampled or
   transcoded to MP3 — never to a format Scratch cannot load.
 - Opening a page from disk (`file://`) disables Web Workers, so the tools fall
