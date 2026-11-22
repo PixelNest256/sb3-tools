@@ -249,7 +249,7 @@
       .replace(/\r?\n?[ \t]*<!--\s*SB3TOOLS-WATERMARK(?::[\s\S]*?)?-->[ \t]*\r?\n?/gi, "")
       // The current hidden <desc> marker.  Match either the marker text or
       // our id so a partially edited element is still replaced cleanly.
-      .replace(/\r?\n?[ \t]*<desc\b[^>]*>[\s\S]*?SB3TOOLS-WATERMARK:[\s\S]*?<\/desc>[ \t]*\r?\n?/gi, "")
+      .replace(/\r?\n?[ \t]*<desc\b[^>]*>(?:(?!<\/desc>)[\s\S])*?SB3TOOLS-WATERMARK:(?:(?!<\/desc>)[\s\S])*?<\/desc>[ \t]*\r?\n?/gi, "")
       .replace(/\r?\n?[ \t]*<desc\b[^>]*\bid=["']sb3tools-watermark["'][^>]*>[\s\S]*?<\/desc>[ \t]*\r?\n?/gi, "");
   }
 

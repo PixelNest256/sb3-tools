@@ -212,6 +212,14 @@ function entriesFixture() {
   equal(WM.applyToSvg(plainMarked, plainPayload), plainMarked,
     "re-watermarking an unchanged SVG is byte-idempotent");
 
+  // An unrelated <desc> belongs to the artwork and must be preserved.
+  const withUserDesc = '<svg xmlns="http://www.w3.org/2000/svg"><desc>artist note</desc><rect width="4" height="3"/></svg>';
+  const withUserMarked = WM.applyToSvg(withUserDesc, plainPayload);
+  check(withUserMarked.includes("<desc>artist note</desc>"),
+    "an unrelated SVG description is preserved");
+  equal(WM.stripWatermarks(withUserMarked), withUserDesc,
+    "stripping the watermark leaves the unrelated SVG description intact");
+
   // Same metadata: stripping and reinserting must be idempotent.
   const again = WM.applyToProject(marked.project, marked.entries, {
     kind: "project", name: "My Project.sb3", version: "1.2.3",
