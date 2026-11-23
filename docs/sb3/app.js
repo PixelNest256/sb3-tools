@@ -25,6 +25,8 @@
         fields_removed: "default fields removed",
         monitors_updated: "monitors updated",
         vars_removed: "unused variables removed",
+        duplicate_assignments_removed: "duplicate literal assignments removed",
+        empty_ifs_removed: "empty if blocks removed",
         lists_removed: "unused lists removed",
         procs_renamed: "custom blocks shortened",
         args_renamed: "arguments renamed",
@@ -131,6 +133,8 @@
         fields_removed: "既定フィールドを削除",
         monitors_updated: "モニターを更新",
         vars_removed: "未使用の変数を削除",
+        duplicate_assignments_removed: "重複する固定値の代入を削除",
+        empty_ifs_removed: "空のifブロックを削除",
         lists_removed: "未使用のリストを削除",
         procs_renamed: "カスタムブロック名を短縮",
         args_renamed: "引数名を短縮",
@@ -256,6 +260,8 @@
     compactMenuShadows: true,
     removeDeadAssets: false,
     removeWriteOnly: false,
+    removeDuplicateAssignments: false,
+    removeEmptyIfs: false,
     normalizeTypes: false,
     stripNullFieldIds: false,
     zeroTopLevelCoords: false
@@ -298,7 +304,7 @@
       keys: keys.filter(function (key) { return speedSensitive.indexOf(key) === -1; }).concat(maxStage)
     });
     keys = keys.concat(maxStage);
-    out.push({ id: "max", keys: keys });
+    out.push({ id: "max", keys: keys.concat(["removeDuplicateAssignments", "removeEmptyIfs"]) });
     return out;
   })();
 
@@ -336,6 +342,7 @@
     "dead_costumes_removed", "dead_sounds_removed", "dead_sprites_removed",
     "dead_assets_skipped",
     "writeonly_vars_removed", "writeonly_lists_removed",
+    "duplicate_assignments_removed", "empty_ifs_removed",
     "md5ext_removed", "numeric_strings_normalized", "meta_agent_cleared"
   ];
 

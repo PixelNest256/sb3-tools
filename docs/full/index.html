@@ -133,6 +133,8 @@
             <label class="opt" title="Sets top-level script workspace coordinates to zero. This changes editor placement only, not execution."><input type="checkbox" data-popt="zeroTopLevelCoords"><span>Zero top-level block coordinates</span></label>
             <label class="opt" title="Removes costumes, sounds, or sprites proven unused by direct literal references. Assets are kept when references are dynamic or uncertain."><input type="checkbox" data-popt="removeDeadAssets"><span>Remove dead assets (direct references only)</span></label>
             <label class="opt" title="Removes variables and lists that are written but never read. References are checked by ID and name; indirect access may need review."><input type="checkbox" data-popt="removeWriteOnly"><span>Remove write-only variables and lists</span></label>
+            <label class="opt" title="Removes consecutive assignments of the exact same literal value to the same variable. Dynamic values and non-adjacent writes are preserved."><input type="checkbox" data-popt="removeDuplicateAssignments"><span>Remove duplicate literal assignments</span></label>
+            <label class="opt" title="Removes empty if blocks only when their condition is a uniquely-owned tree of known pure reporters. Unknown or shared conditions are preserved."><input type="checkbox" data-popt="removeEmptyIfs"><span>Remove empty if blocks (safe conditions only)</span></label>
           </fieldset>
           <fieldset class="opt-group">
             <legend>Restructure</legend>

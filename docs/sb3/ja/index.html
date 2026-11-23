@@ -136,6 +136,8 @@
             <label class="opt" title="動き・見た目・音・調べる・イベントなど、動作確認済みの Scratch メニューシャドウを SB3 のプリミティブ入力に置き換えます。確認済みの種類だけが対象です。変数・リストのフィールドは対象外です。「内部 ID を短縮」も有効にしてください。"><input type="checkbox" checked data-opt="compactMenuShadows"><span>確認済みメニューシャドウを圧縮</span></label>
             <label class="opt" title="直接指定された参照から未使用と確実に判断できるコスチューム・音・スプライトを削除します。動的参照などで判断できない場合は残します。"><input type="checkbox" data-opt="removeDeadAssets"><span>未使用アセットを削除（直接参照のみ）</span></label>
             <label class="opt" title="値を書き込むだけで読み取られない変数・リストを削除します。ID と名前の両方で調べますが、間接的なアクセスがある場合は注意してください。"><input type="checkbox" data-opt="removeWriteOnly"><span>書き込み専用の変数とリストを削除</span></label>
+            <label class="opt" title="同じ変数に同一の固定値を連続して代入する場合、2回目以降を削除します。動的な値や間に別ブロックがある場合は変更しません。"><input type="checkbox" data-opt="removeDuplicateAssignments"><span>重複する固定値の代入を削除</span></label>
+            <label class="opt" title="条件式が既知の純粋なReporterのみで構成され、共有参照がない空のifブロックを削除します。不明な条件式や共有Reporterは保持します。"><input type="checkbox" data-opt="removeEmptyIfs"><span>空のifブロックを削除（安全な条件式のみ）</span></label>
             <label class="opt" title="最上位スクリプトのワークスペース座標を 0 にします。エディター上の配置だけが変わり、実行には影響しません。"><input type="checkbox" data-opt="zeroTopLevelCoords"><span>最上位ブロックの座標を0に</span></label>
             <label class="opt" title="ブロックコメントを本文・位置情報ごとすべて削除します。説明やメモを残したい場合はオフにしてください。"><input type="checkbox" data-opt="stripComments"><span>すべてのコメントを削除（内容は失われます）</span></label>
           </fieldset>

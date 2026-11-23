@@ -69,6 +69,8 @@
         fields_removed: "default fields removed",
         monitors_updated: "monitors updated",
         vars_removed: "unused variables removed",
+        duplicate_assignments_removed: "duplicate literal assignments removed",
+        empty_ifs_removed: "empty if blocks removed",
         lists_removed: "unused lists removed",
         procs_renamed: "custom blocks shortened",
         args_renamed: "arguments renamed",
@@ -174,6 +176,8 @@
         fields_removed: "既定フィールドを削除",
         monitors_updated: "モニターを更新",
         vars_removed: "未使用の変数を削除",
+        duplicate_assignments_removed: "重複する固定値の代入を削除",
+        empty_ifs_removed: "空のifブロックを削除",
         lists_removed: "未使用のリストを削除",
         procs_renamed: "カスタムブロック名を短縮",
         args_renamed: "引数名を短縮",
@@ -238,7 +242,7 @@
     "loopDuplicates", "inlineSingleCall", "removeNoops", "simplifyIfElse",
     "reuseReporters",
     "compressProcs", "freqIds", "foldConstants", "propagateConstants",
-    "removeDeadAssets", "removeWriteOnly", "normalizeTypes",
+    "removeDeadAssets", "removeWriteOnly", "removeDuplicateAssignments", "removeEmptyIfs", "normalizeTypes",
     "stripNullFieldIds", "zeroTopLevelCoords", "stripComments"
   ];
   var PROJECT_KEY = "sb3-full-project-v3";
@@ -283,7 +287,7 @@
       keys: keys.filter(function (key) { return speedSensitive.indexOf(key) === -1; }).concat(maxStage)
     });
     keys = keys.concat(maxStage);
-    out.push({ id: "max", keys: keys });
+    out.push({ id: "max", keys: keys.concat(["removeDuplicateAssignments", "removeEmptyIfs"]) });
     return out;
   })();
 
@@ -410,6 +414,8 @@
     out.clearInitialValues = false;
     out.stripNullFieldIds = false;
     out.removeWriteOnly = false;
+    out.removeDuplicateAssignments = false;
+    out.removeEmptyIfs = false;
     out.normalizeTypes = false;
     out.zeroTopLevelCoords = false;
     out.stripComments = false;

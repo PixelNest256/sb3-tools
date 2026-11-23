@@ -43,6 +43,15 @@
     "procedures_return"
   ]);
   const LITERAL_PRIMITIVE_TYPES = new Set([4, 5, 6, 7, 8, 10]);
+  const EMPTY_IF_PURE_REPORTERS = new Set([
+    "operator_not", "operator_equals", "operator_and", "operator_or",
+    "operator_gt", "operator_lt", "operator_contains", "operator_add",
+    "operator_subtract", "operator_multiply", "operator_divide", "operator_mod",
+    "operator_round", "operator_mathop", "operator_join", "operator_letter_of",
+    "operator_length", "data_variable", "data_listcontents", "data_itemoflist",
+    "data_itemnumoflist", "data_lengthoflist", "data_listcontainsitem",
+    "looks_costumenumbername", "looks_backdropnumbername"
+  ]);
   const SENSING_STAGE_PROPERTIES = new Set(["background #", "backdrop #", "backdrop name", "volume"]);
   const SENSING_SPRITE_PROPERTIES = new Set(["x position", "y position", "direction",
     "costume #", "costume name", "size", "volume"]);
@@ -306,6 +315,8 @@
     compactWorkspace: false,
     removeDeadAssets: false,
     removeWriteOnly: false,
+    removeDuplicateAssignments: false,
+    removeEmptyIfs: false,
     normalizeTypes: false,
     stripNullFieldIds: false,
     zeroTopLevelCoords: false
@@ -351,6 +362,7 @@
         dead_costumes_removed: 0, dead_sounds_removed: 0, dead_sprites_removed: 0,
         dead_assets_skipped: 0,
         writeonly_vars_removed: 0, writeonly_lists_removed: 0,
+        duplicate_assignments_removed: 0, empty_ifs_removed: 0,
         md5ext_removed: 0, numeric_strings_normalized: 0, meta_agent_cleared: 0
       };
       this.varMap = new Map();
@@ -425,6 +437,13 @@
           o.foldConstants || o.loopDuplicates || o.propagateConstants) {
         this.progress("collect", 1.0, "Simplifying scripts...");
         this._simplifyProject(project);
+      }
+      if (o.removeDuplicateAssignments || o.removeEmptyIfs) {
+        for (const tgt of targets) {
+          if (!isDict(tgt) || !isDict(tgt.blocks)) continue;
+          if (o.removeDuplicateAssignments) this._removeDuplicateAssignments(tgt.blocks, tgt.comments);
+          if (o.removeEmptyIfs) this._removeEmptyIfs(tgt.blocks, tgt.comments);
+        }
       }
       if (o.removeDeadAssets) {
         this.progress("collect", 1.0, "Removing dead assets...");
@@ -2072,6 +2091,117 @@
         delete inputs.SUBSTACK2;
         blk.opcode = "control_if";
         st.ifelse_converted += 1;
+      }
+    }
+
+    _literalAssignmentValue(entry) {
+      if (!isArr(entry)) return null;
+      const items = entry.slice(1);
+      const primitives = items.filter((v) => isArr(v));
+      if (primitives.length !== 1 ||
+          !items.every((v) => v === primitives[0] || v === null || v === undefined)) return null;
+      const primitive = primitives[0];
+      if (primitive.length < 2 || !LITERAL_PRIMITIVE_TYPES.has(primitive[0]) ||
+          !(isStr(primitive[1]) || typeof primitive[1] === "number")) return null;
+      return [primitive[0], primitive[1]];
+    }
+
+    _removeDuplicateAssignments(blocks, comments) {
+      const st = this.stats;
+      for (const [id, blk] of Object.entries(blocks)) {
+        if (!isDict(blk) || blk.opcode !== "data_setvariableto") continue;
+        const variable = (blk.fields || {}).VARIABLE;
+        if (!isArr(variable) || !isStr(variable[1]) || !variable[1]) continue;
+        const value = this._literalAssignmentValue((blk.inputs || {}).VALUE);
+        if (!value) continue;
+        if (isDict(comments) && Object.values(comments).some((c) => isDict(c) && c.blockId === id)) continue;
+        const parent = isStr(blk.parent) ? blocks[blk.parent] : null;
+        if (!isDict(parent) || parent.next !== id || parent.opcode !== "data_setvariableto") continue;
+        const pv = (parent.fields || {}).VARIABLE;
+        if (!isArr(pv) || pv[0] !== variable[0] || pv[1] !== variable[1]) continue;
+        const pvalue = this._literalAssignmentValue((parent.inputs || {}).VALUE);
+        if (!pvalue || pvalue[0] !== value[0] || pvalue[1] !== value[1]) continue;
+        if (this._spliceOut(blocks, id)) st.duplicate_assignments_removed += 1;
+      }
+    }
+
+    _isSafeEmptyIfPrimitive(value) {
+      if (!isArr(value) || value.length < 2) return false;
+      if (LITERAL_PRIMITIVE_TYPES.has(value[0])) {
+        return isStr(value[1]) || typeof value[1] === "number";
+      }
+      // SB3 primitive type 12 is a variable/list store reference. It is a
+      // synchronous read with no side effect, so it is safe in a discarded test.
+      return (value[0] === 12 || value[0] === 13) && value.length >= 3 &&
+        isStr(value[1]) && isStr(value[2]);
+    }
+
+    _safeEmptyIfCondition(blocks, entry, parentId, incoming, owned) {
+      if (!isArr(entry)) return false;
+      const refs = entry.slice(1).filter((v) => isStr(v));
+      if (!refs.length) {
+        const items = entry.slice(1);
+        const primitives = items.filter((v) => isArr(v));
+        return primitives.length === 1 &&
+          items.every((v) => v === primitives[0] || v === null || v === undefined) &&
+          this._isSafeEmptyIfPrimitive(primitives[0]);
+      }
+      if (refs.length !== 1 || entry.slice(1).some((v) =>
+          isArr(v) || (v !== refs[0] && v !== null && v !== undefined))) return false;
+
+      const visit = (id, expectedParent) => {
+        if (!isStr(id) || owned.has(id) || !has(blocks, id)) return false;
+        const blk = blocks[id];
+        if (!isDict(blk) || !EMPTY_IF_PURE_REPORTERS.has(blk.opcode) ||
+            (blk.next !== null && blk.next !== undefined) ||
+            blk.parent !== expectedParent || incoming.get(id) !== 1) return false;
+        owned.add(id);
+        for (const childEntry of Object.values(isDict(blk.inputs) ? blk.inputs : {})) {
+          if (!isArr(childEntry)) return false;
+          const childRefs = childEntry.slice(1).filter((v) => isStr(v));
+          if (childRefs.length === 1 && !childEntry.slice(1).some((v) => isArr(v))) {
+            if (!visit(childRefs[0], id)) return false;
+          } else if (childRefs.length === 0) {
+            const items = childEntry.slice(1);
+            const primitives = items.filter((v) => isArr(v));
+            if (primitives.length !== 1 ||
+                !items.every((v) => v === primitives[0] || v === null || v === undefined) ||
+                !this._isSafeEmptyIfPrimitive(primitives[0])) return false;
+          } else return false;
+        }
+        return true;
+      };
+      return visit(refs[0], parentId);
+    }
+
+    _removeEmptyIfs(blocks, comments) {
+      const st = this.stats;
+      const incoming = new Map();
+      for (const blk of Object.values(blocks)) {
+        if (!isDict(blk) || !isDict(blk.inputs)) continue;
+        for (const entry of Object.values(blk.inputs)) {
+          if (!isArr(entry)) continue;
+          for (let i = 1; i < entry.length; i++) {
+            const id = entry[i];
+            if (isStr(id) && has(blocks, id)) incoming.set(id, (incoming.get(id) || 0) + 1);
+          }
+        }
+      }
+      for (const [id, blk] of Object.entries(blocks)) {
+        if (!isDict(blk) || blk.opcode !== "control_if" || !isDict(blk.inputs)) continue;
+        const substack = blk.inputs.SUBSTACK;
+        let empty = substack === undefined || substack === null;
+        if (isArr(substack)) {
+          empty = substack.length < 2 ||
+            substack.slice(1).every((value) => value === null || value === undefined);
+        }
+        if (!empty) continue;
+        if (Object.keys(blk.inputs).some((key) => key !== "CONDITION" && key !== "SUBSTACK")) continue;
+        const owned = new Set();
+        if (!this._safeEmptyIfCondition(blocks, blk.inputs.CONDITION, id, incoming, owned)) continue;
+        if (isDict(comments) && Object.values(comments).some((c) =>
+            isDict(c) && (c.blockId === id || owned.has(c.blockId)))) continue;
+        if (this._spliceOut(blocks, id)) st.empty_ifs_removed += 1;
       }
     }
 

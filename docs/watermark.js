@@ -38,7 +38,8 @@
     "removeNoops", "inlineSingleCall", "foldConstants", "loopDuplicates",
     "propagateConstants", "reuseReporters", "stripComments", "compactWorkspace",
     "removeDeadAssets", "removeWriteOnly", "normalizeTypes", "stripNullFieldIds",
-    "zeroTopLevelCoords", "compactMenuShadows"
+    "zeroTopLevelCoords", "compactMenuShadows",
+    "removeDuplicateAssignments", "removeEmptyIfs"
   ];
 
   // The full compressor has a second group of boolean media options.  The

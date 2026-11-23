@@ -133,6 +133,8 @@
             <label class="opt" title="最上位スクリプトのワークスペース座標を 0 にします。エディター上の配置だけが変わり、実行には影響しません。"><input type="checkbox" data-popt="zeroTopLevelCoords"><span>最上位ブロックの座標を0に</span></label>
             <label class="opt" title="直接指定された参照から未使用と確実に判断できるコスチューム・音・スプライトを削除します。動的参照などで判断できない場合は残します。"><input type="checkbox" data-popt="removeDeadAssets"><span>未使用アセットを削除（直接参照のみ）</span></label>
             <label class="opt" title="値を書き込むだけで読み取られない変数・リストを削除します。ID と名前の両方で調べますが、間接的なアクセスがある場合は注意してください。"><input type="checkbox" data-popt="removeWriteOnly"><span>書き込み専用の変数とリストを削除</span></label>
+            <label class="opt" title="同じ変数に同一の固定値を連続して代入する場合、2回目以降を削除します。動的な値や間に別ブロックがある場合は変更しません。"><input type="checkbox" data-popt="removeDuplicateAssignments"><span>重複する固定値の代入を削除</span></label>
+            <label class="opt" title="条件式が既知の純粋なReporterのみで構成され、共有参照がない空のifブロックを削除します。不明な条件式や共有Reporterは保持します。"><input type="checkbox" data-popt="removeEmptyIfs"><span>空のifブロックを削除（安全な条件式のみ）</span></label>
           </fieldset>
           <fieldset class="opt-group">
             <legend>構造をまとめる</legend>
