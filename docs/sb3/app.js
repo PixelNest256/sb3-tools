@@ -273,18 +273,29 @@
       ]],
       ["optimize", [
         "extractDuplicates", "nearDuplicates", "loopDuplicates", "reuseReporters"
-      ]],
-      ["max", [
-        "stripComments", "compactWorkspace", "removeMonitors", "zeroTopLevelCoords",
-        "removeDeadAssets", "removeWriteOnly"
       ]]
+    ];
+    var maxStage = [
+      "stripComments", "compactWorkspace", "removeMonitors", "zeroTopLevelCoords",
+      "removeDeadAssets", "removeWriteOnly"
+    ];
+    // Keep the size-oriented transforms out of the speed preset: they can
+    // add procedure/loop dispatches or temporary-variable reads and writes.
+    var speedSensitive = [
+      "extractDuplicates", "nearDuplicates", "loopDuplicates", "reuseReporters"
     ];
     var keys = [];
     var out = [];
     stages.forEach(function (stage) {
       keys = keys.concat(stage[1]);
-      out.push({ id: stage[0], keys: keys });
+      out.push({ id: stage[0], keys: keys.slice() });
     });
+    out.push({
+      id: "speed",
+      keys: keys.filter(function (key) { return speedSensitive.indexOf(key) === -1; }).concat(maxStage)
+    });
+    keys = keys.concat(maxStage);
+    out.push({ id: "max", keys: keys });
     return out;
   })();
 

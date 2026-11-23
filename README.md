@@ -69,9 +69,16 @@ Each tool has an English page and a Japanese page (`…/ja/`). Use `docs/sb3/`,
 
 The `/sb3/` page and the project-data section of `/full/` group these passes
 into presets — **JSON cleanup only**, **No visible change**, **Code cleanup**,
-**Code optimization**, and **Maximum** — and switch to **Custom** as soon as an
-individual option is changed. On `/full/`, a preset changes only the project
+**Code optimization**, **Runtime speed**, and **Maximum** — and switch to
+**Custom** as soon as an individual option is changed. On `/full/`, a preset changes only the project
 data; the separate media strength stays as selected.
+
+**Runtime speed** enables the same cleanup and asset/store passes as Maximum,
+but leaves duplicate extraction, near-duplicate merging, loop conversion, and
+reporter caching off. These transformations can add custom-block or loop
+dispatches, or replace reporter evaluation with temporary-variable writes and
+reads. Single-use inlining, no-op removal, and empty if-else simplification stay
+enabled because they do not introduce that extra runtime work.
 
 **Maximum** also enables dead-asset and write-only-store removal, but with a
 safety gate: dead assets are removed only when every costume, sound, and sprite
