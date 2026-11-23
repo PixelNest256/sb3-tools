@@ -1684,6 +1684,62 @@ check(!!(sensedSprite.variables || {}).V1, "a variable read by sensing_of was re
 check(opcodesOf(sensedSprite).includes("data_setvariableto"),
   "the writer of a variable read by sensing_of was removed");
 
+// A dynamic OBJECT reporter may have a sensing_of_object_menu shadow with a
+// plausible-looking sprite name. That shadow is only a fallback, not the
+// selected object; ID shortening must not resolve PROPERTY against it.
+const dynamicSensingRun = SB3.compressProject(buildMiniProject([
+  stageOf(),
+  buildTarget("dots", false, {
+    variables: { DOTVAR: ["pte_cap", 0] }
+  }),
+  buildTarget("Sprite2", false, {
+    blocks: {
+      flag: blk("event_whenflagclicked", { topLevel: true, x: 40, y: 40, next: "of" }),
+      of: blk("sensing_of", {
+        parent: "flag",
+        inputs: { OBJECT: [3, "dynamicName", "ofMenu"] },
+        fields: { PROPERTY: ["pte_cap", null] }
+      }),
+      dynamicName: blk("operator_join", {
+        parent: "of", inputs: { STRING1: [1, [10, "dots"]], STRING2: [1, [10, ""]] }
+      }),
+      ofMenu: blk("sensing_of_object_menu", {
+        shadow: true, parent: "of", fields: { OBJECT: ["dots", null] }
+      })
+    }
+  })
+]), new SB3.Options({ shortenIds: true, renameStores: true }), () => {});
+audit(dynamicSensingRun.project);
+const dynamicSensingSprite = findTarget(dynamicSensingRun.project, "Sprite2");
+const dynamicSensingBlock = Object.values(dynamicSensingSprite.blocks).find(
+  (b) => b && b.opcode === "sensing_of");
+check(!!dynamicSensingBlock && dynamicSensingBlock.fields.PROPERTY[0] === "pte_cap",
+  "a dynamic sensing_of OBJECT reporter was incorrectly resolved through its shadow menu");
+
+// A static menu naming a target that does not exist must remain untouched and
+// must not dereference a missing/null store mapping during ID shortening.
+const unresolvedSensingRun = SB3.compressProject(buildMiniProject([
+  stageOf(),
+  buildTarget("Sprite2", false, {
+    blocks: {
+      flag: blk("event_whenflagclicked", { topLevel: true, x: 40, y: 40, next: "of" }),
+      of: blk("sensing_of", {
+        parent: "flag", inputs: { OBJECT: [1, "ofMenu"] },
+        fields: { PROPERTY: ["missingProperty", null] }
+      }),
+      ofMenu: blk("sensing_of_object_menu", {
+        shadow: true, parent: "of", fields: { OBJECT: ["NoSuchTarget", null] }
+      })
+    }
+  })
+]), new SB3.Options({ shortenIds: true, renameStores: true }), () => {});
+audit(unresolvedSensingRun.project);
+const unresolvedSensingSprite = findTarget(unresolvedSensingRun.project, "Sprite2");
+const unresolvedSensingBlock = Object.values(unresolvedSensingSprite.blocks).find(
+  (b) => b && b.opcode === "sensing_of");
+check(!!unresolvedSensingBlock && unresolvedSensingBlock.fields.PROPERTY[0] === "missingProperty",
+  "an unresolved static sensing_of target changed its PROPERTY field");
+
 // ------------------------------------------------------------------
 // Backdrops are shared: a sprite's `next backdrop` changes the Stage.
 function buildBackdropProject(spriteBlocks, stageBlocks, currentCostume) {

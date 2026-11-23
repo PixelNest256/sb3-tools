@@ -5213,16 +5213,20 @@
         const f = (blk.fields || {}).OBJECT;
         if (isArr(f) && f.length) return f[0];
         const inp = (blk.inputs || {}).OBJECT;
-        if (isArr(inp)) {
-          for (let i = 1; i < inp.length; i++) {
-            if (isStr(inp[i])) {
-              const menu = blocks[inp[i]];
-              if (isDict(menu) && menu.opcode === "sensing_of_object_menu") {
-                const mf = (menu.fields || {}).OBJECT;
-                if (isArr(mf) && mf.length) return mf[0];
-              }
-            }
+        if (!isArr(inp)) return null;
+        // Scratch encodes a shadowed input as [3, realBlock, shadowBlock].
+        // The shadow menu is only a UI fallback when a real reporter is
+        // connected; it must not be mistaken for the selected sprite.
+        for (let i = 1; i < inp.length; i++) {
+          if (!isStr(inp[i]) || !has(blocks, inp[i])) continue;
+          const candidate = blocks[inp[i]];
+          if (!isDict(candidate)) continue;
+          if (candidate.opcode === "sensing_of_object_menu") {
+            const mf = (candidate.fields || {}).OBJECT;
+            if (isArr(mf) && mf.length) return mf[0];
+            continue;
           }
+          if (candidate.shadow !== true) return null;
         }
         return null;
       };
@@ -5288,7 +5292,7 @@
                 const vScope = isStr(objName) ? this.varByTarget.get(objName) : null;
                 const lScope = isStr(objName) ? this.listByTarget.get(objName) : null;
                 const sm = (vScope && vScope.get(name)) || (lScope && lScope.get(name));
-                if (sm !== undefined) blk.fields[k] = [sm[1], ...fv.slice(1)];
+                if (sm) blk.fields[k] = [sm[1], ...fv.slice(1)];
                 continue;
               }
               let m = null;
