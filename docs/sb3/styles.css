@@ -377,6 +377,8 @@ h1 {
   color: var(--lead);
 }
 
+.lead + .lead { margin-top: 0.7em; }
+
 .spec {
   display: flex;
   flex-wrap: wrap;
