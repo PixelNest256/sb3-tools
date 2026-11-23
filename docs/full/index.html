@@ -125,41 +125,41 @@
         <div class="opt-grid">
           <fieldset class="opt-group">
             <legend>Reclaim space</legend>
-            <label class="opt"><input type="checkbox" checked data-popt="stripDefaults"><span>Remove values Scratch restores</span></label>
-            <label class="opt"><input type="checkbox" checked data-popt="removeUnused"><span>Remove unused variables and lists</span></label>
-            <label class="opt"><input type="checkbox" checked data-popt="dropObscuredShadows"><span>Drop hidden input defaults</span></label>
-            <label class="opt"><input type="checkbox" checked data-popt="removeUnreachable"><span>Remove code that never runs</span></label>
-            <label class="opt"><input type="checkbox" data-popt="stripComments"><span>Remove all comments (their text is lost)</span></label>
-            <label class="opt"><input type="checkbox" data-popt="zeroTopLevelCoords"><span>Zero top-level block coordinates</span></label>
-            <label class="opt" title="Only runs when every costume, sound, and sprite reference is a literal, directly known value; otherwise no assets are removed."><input type="checkbox" data-popt="removeDeadAssets"><span>Remove dead assets (direct references only)</span></label>
-            <label class="opt" title="Removes variables and lists that are written but never read, resolving references by id and by name."><input type="checkbox" data-popt="removeWriteOnly"><span>Remove write-only variables and lists</span></label>
+            <label class="opt" title="Removes block properties and input values that Scratch restores automatically when omitted, reducing project.json without changing effective defaults."><input type="checkbox" checked data-popt="stripDefaults"><span>Remove values Scratch restores</span></label>
+            <label class="opt" title="Removes variables and lists with no remaining project references. Check projects that construct names dynamically or access data indirectly."><input type="checkbox" checked data-popt="removeUnused"><span>Remove unused variables and lists</span></label>
+            <label class="opt" title="Removes shadow inputs hidden behind connected real inputs; Scratch uses the connected input instead of the hidden fallback."><input type="checkbox" checked data-popt="dropObscuredShadows"><span>Drop hidden input defaults</span></label>
+            <label class="opt" title="Removes blocks that cannot be reached during stack execution, such as blocks after a script-ending control block."><input type="checkbox" checked data-popt="removeUnreachable"><span>Remove code that never runs</span></label>
+            <label class="opt" title="Deletes all block comments, including their text and placement. Keep off if comments contain documentation."><input type="checkbox" data-popt="stripComments"><span>Remove all comments (their text is lost)</span></label>
+            <label class="opt" title="Sets top-level script workspace coordinates to zero. This changes editor placement only, not execution."><input type="checkbox" data-popt="zeroTopLevelCoords"><span>Zero top-level block coordinates</span></label>
+            <label class="opt" title="Removes costumes, sounds, or sprites proven unused by direct literal references. Assets are kept when references are dynamic or uncertain."><input type="checkbox" data-popt="removeDeadAssets"><span>Remove dead assets (direct references only)</span></label>
+            <label class="opt" title="Removes variables and lists that are written but never read. References are checked by ID and name; indirect access may need review."><input type="checkbox" data-popt="removeWriteOnly"><span>Remove write-only variables and lists</span></label>
           </fieldset>
           <fieldset class="opt-group">
             <legend>Restructure</legend>
-            <label class="opt"><input type="checkbox" checked data-popt="extractDuplicates"><span>Extract repeated code</span></label>
-            <label class="opt"><input type="checkbox" checked data-popt="nearDuplicates"><span>Merge near-identical code</span></label>
-            <label class="opt"><input type="checkbox" checked data-popt="loopDuplicates"><span>Replace repeated runs with loops</span></label>
-            <label class="opt"><input type="checkbox" checked data-popt="inlineSingleCall"><span>Inline blocks used only once</span></label>
-            <label class="opt"><input type="checkbox" checked data-popt="removeNoops"><span>Remove do-nothing blocks</span></label>
-            <label class="opt"><input type="checkbox" checked data-popt="simplifyIfElse"><span>Turn empty if-else into if</span></label>
-            <label class="opt" title="Stores an identical reporter in a temporary variable and reads it again instead of repeating it."><input type="checkbox" checked data-popt="reuseReporters"><span>Reuse repeated reporter values</span></label>
+            <label class="opt" title="Extracts identical repeated code sequences into reusable custom procedures and replaces each copy with a procedure call."><input type="checkbox" checked data-popt="extractDuplicates"><span>Extract repeated code</span></label>
+            <label class="opt" title="Combines structurally similar code sequences by extracting common structure and using inputs for differing parts where supported."><input type="checkbox" checked data-popt="nearDuplicates"><span>Merge near-identical code</span></label>
+            <label class="opt" title="Converts adjacent repeated copies of the same block sequence into a repeat loop, reducing duplicated block data."><input type="checkbox" checked data-popt="loopDuplicates"><span>Replace repeated runs with loops</span></label>
+            <label class="opt" title="Expands a custom procedure at its only call site, removing call/definition indirection while preserving arguments and execution order."><input type="checkbox" checked data-popt="inlineSingleCall"><span>Inline blocks used only once</span></label>
+            <label class="opt" title="Removes blocks with no effect on project state or control flow, such as empty or redundant placeholder operations."><input type="checkbox" checked data-popt="removeNoops"><span>Remove do-nothing blocks</span></label>
+            <label class="opt" title="Rewrites an if-else with one empty branch as a plain if, removing the unnecessary empty branch."><input type="checkbox" checked data-popt="simplifyIfElse"><span>Turn empty if-else into if</span></label>
+            <label class="opt" title="Caches repeated identical reporter expressions in a temporary variable. This reduces reevaluation but adds variable reads and writes."><input type="checkbox" checked data-popt="reuseReporters"><span>Reuse repeated reporter values</span></label>
           </fieldset>
           <fieldset class="opt-group">
             <legend>Rename &amp; fold</legend>
-            <label class="opt"><input type="checkbox" checked data-popt="shortenIds"><span>Shorten internal IDs</span></label>
-            <label class="opt" title="Names change only while internal IDs are also shortened."><input type="checkbox" checked data-popt="renameStores"><span>Shorten variable and list names</span></label>
-            <label class="opt"><input type="checkbox" checked data-popt="freqIds"><span>Give frequent blocks shorter IDs</span></label>
-            <label class="opt"><input type="checkbox" checked data-popt="compressProcs"><span>Shorten custom block names</span></label>
-            <label class="opt"><input type="checkbox" checked data-popt="foldConstants"><span>Calculate constant math</span></label>
-            <label class="opt"><input type="checkbox" checked data-popt="propagateConstants"><span>Replace constant variables with values</span></label>
-            <label class="opt" title="Deletes hidden monitors so their variables and lists can be shortened or removed. Visible monitors stay; their saved values are cleared."><input type="checkbox" data-popt="removeMonitors"><span>Don't keep monitors and their positions</span></label>
+            <label class="opt" title="Replaces long internal block, variable, and list identifiers with shorter IDs. Visible names are not changed."><input type="checkbox" checked data-popt="shortenIds"><span>Shorten internal IDs</span></label>
+            <label class="opt" title="Shortens variable and list display names to reduce stored text. Requires internal ID shortening and changes visible names."><input type="checkbox" checked data-popt="renameStores"><span>Shorten variable and list names</span></label>
+            <label class="opt" title="Assigns shorter internal IDs to frequently occurring block types, reducing repeated ID text in project.json."><input type="checkbox" checked data-popt="freqIds"><span>Give frequent blocks shorter IDs</span></label>
+            <label class="opt" title="Shortens custom procedure names in their prototype and call metadata; displayed custom block names may change."><input type="checkbox" checked data-popt="compressProcs"><span>Shorten custom block names</span></label>
+            <label class="opt" title="Evaluates expressions whose inputs are all constants and replaces each expression with its result."><input type="checkbox" checked data-popt="foldConstants"><span>Calculate constant math</span></label>
+            <label class="opt" title="Replaces variable reads with a proven constant value when analysis shows the value cannot change along that path."><input type="checkbox" checked data-popt="propagateConstants"><span>Replace constant variables with values</span></label>
+            <label class="opt" title="Removes hidden variable/list monitors and saved monitor positions. Visible monitors remain; monitor settings or saved values may be discarded."><input type="checkbox" data-popt="removeMonitors"><span>Don't keep monitors and their positions</span></label>
           </fieldset>
           <fieldset class="opt-group opt-group--danger">
             <legend>Risky</legend>
             <p class="danger-note">These passes rewrite stored values or field shapes. They stay off unless you enable them; test the result.</p>
-            <label class="opt"><input type="checkbox" data-popt="clearInitialValues"><span>Clear overwritten starting values</span></label>
-            <label class="opt"><input type="checkbox" data-popt="normalizeTypes"><span>Normalize types and representations</span></label>
-            <label class="opt"><input type="checkbox" data-popt="stripNullFieldIds"><span>Strip null field IDs</span></label>
+            <label class="opt" title="Clears a starting value when code is determined to overwrite it before reading it. This changes saved data; test carefully."><input type="checkbox" data-popt="clearInitialValues"><span>Clear overwritten starting values</span></label>
+            <label class="opt" title="Rewrites selected stored values into normalized JSON types or representations. Projects or extensions may depend on the original form."><input type="checkbox" data-popt="normalizeTypes"><span>Normalize types and representations</span></label>
+            <label class="opt" title="Removes null-valued field ID entries from blocks. This changes stored field structure and should be tested in the target runtime."><input type="checkbox" data-popt="stripNullFieldIds"><span>Strip null field IDs</span></label>
           </fieldset>
         </div>
 

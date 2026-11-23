@@ -125,41 +125,41 @@
         <div class="opt-grid">
           <fieldset class="opt-group">
             <legend>容量を削る</legend>
-            <label class="opt"><input type="checkbox" checked data-popt="stripDefaults"><span>Scratch が復元する値を削除</span></label>
-            <label class="opt"><input type="checkbox" checked data-popt="removeUnused"><span>未使用の変数とリストを削除</span></label>
-            <label class="opt"><input type="checkbox" checked data-popt="dropObscuredShadows"><span>隠れた入力の既定値を削除</span></label>
-            <label class="opt"><input type="checkbox" checked data-popt="removeUnreachable"><span>実行されないコードを削除</span></label>
-            <label class="opt"><input type="checkbox" data-popt="stripComments"><span>すべてのコメントを削除（内容は失われます）</span></label>
-            <label class="opt"><input type="checkbox" data-popt="zeroTopLevelCoords"><span>最上位ブロックの座標を0に</span></label>
-            <label class="opt" title="すべてのコスチューム・サウンド・スプライト参照が直接わかる値のときだけ実行し、動的な参照があればアセットを削除しません。"><input type="checkbox" data-popt="removeDeadAssets"><span>未使用アセットを削除（直接参照のみ）</span></label>
-            <label class="opt" title="書き込まれるだけで読まれない変数・リストを削除します。ID と名前の両方で参照を解決します。"><input type="checkbox" data-popt="removeWriteOnly"><span>書き込み専用の変数とリストを削除</span></label>
+            <label class="opt" title="省略しても Scratch が自動的に補うブロックのプロパティや入力値を削除し、実効値を保ったまま project.json を小さくします。"><input type="checkbox" checked data-popt="stripDefaults"><span>Scratch が復元する値を削除</span></label>
+            <label class="opt" title="プロジェクト内に参照が残っていない変数・リストを削除します。名前を動的に組み立てたり、間接的にアクセスしたりする場合は注意してください。"><input type="checkbox" checked data-popt="removeUnused"><span>未使用の変数とリストを削除</span></label>
+            <label class="opt" title="実際の入力ブロックに隠れているシャドウ入力を削除します。Scratch では接続中の入力が優先されるため、隠れた代替値は使われません。"><input type="checkbox" checked data-popt="dropObscuredShadows"><span>隠れた入力の既定値を削除</span></label>
+            <label class="opt" title="スタック実行で到達できないブロックを削除します。たとえばスクリプトを終了する制御ブロックの後ろにあるブロックが対象です。"><input type="checkbox" checked data-popt="removeUnreachable"><span>実行されないコードを削除</span></label>
+            <label class="opt" title="ブロックコメントを本文・位置情報ごとすべて削除します。説明やメモを残したい場合はオフにしてください。"><input type="checkbox" data-popt="stripComments"><span>すべてのコメントを削除（内容は失われます）</span></label>
+            <label class="opt" title="最上位スクリプトのワークスペース座標を 0 にします。エディター上の配置だけが変わり、実行には影響しません。"><input type="checkbox" data-popt="zeroTopLevelCoords"><span>最上位ブロックの座標を0に</span></label>
+            <label class="opt" title="直接指定された参照から未使用と確実に判断できるコスチューム・音・スプライトを削除します。動的参照などで判断できない場合は残します。"><input type="checkbox" data-popt="removeDeadAssets"><span>未使用アセットを削除（直接参照のみ）</span></label>
+            <label class="opt" title="値を書き込むだけで読み取られない変数・リストを削除します。ID と名前の両方で調べますが、間接的なアクセスがある場合は注意してください。"><input type="checkbox" data-popt="removeWriteOnly"><span>書き込み専用の変数とリストを削除</span></label>
           </fieldset>
           <fieldset class="opt-group">
             <legend>構造をまとめる</legend>
-            <label class="opt"><input type="checkbox" checked data-popt="extractDuplicates"><span>繰り返すコードを抽出</span></label>
-            <label class="opt"><input type="checkbox" checked data-popt="nearDuplicates"><span>似たコードをまとめる</span></label>
-            <label class="opt"><input type="checkbox" checked data-popt="loopDuplicates"><span>繰り返しをループにする</span></label>
-            <label class="opt"><input type="checkbox" checked data-popt="inlineSingleCall"><span>1回だけの定義を展開</span></label>
-            <label class="opt"><input type="checkbox" checked data-popt="removeNoops"><span>何もしないブロックを削除</span></label>
-            <label class="opt"><input type="checkbox" checked data-popt="simplifyIfElse"><span>空の if-else を if にする</span></label>
-            <label class="opt" title="同じレポーターを一時変数に保存し、繰り返さずに読み直します。"><input type="checkbox" checked data-popt="reuseReporters"><span>同じレポーターの値を再利用</span></label>
+            <label class="opt" title="完全に同じコード列をカスタムブロックに切り出し、各コピーをそのカスタムブロックの呼び出しに置き換えます。"><input type="checkbox" checked data-popt="extractDuplicates"><span>繰り返すコードを抽出</span></label>
+            <label class="opt" title="構造が似ているコード列をまとめ、対応できる場合は異なる部分を入力として共通構造に統合します。"><input type="checkbox" checked data-popt="nearDuplicates"><span>似たコードをまとめる</span></label>
+            <label class="opt" title="隣接して繰り返される同一のブロック列を repeat ループに置き換え、重複するブロックデータを減らします。"><input type="checkbox" checked data-popt="loopDuplicates"><span>繰り返しをループにする</span></label>
+            <label class="opt" title="呼び出し箇所が1か所だけのカスタムブロックを、その位置へ展開します。引数と実行順序を保ちながら呼び出しの間接処理をなくします。"><input type="checkbox" checked data-popt="inlineSingleCall"><span>1回だけの定義を展開</span></label>
+            <label class="opt" title="空処理や冗長なプレースホルダーなど、状態や制御の流れに影響しないブロックを削除します。"><input type="checkbox" checked data-popt="removeNoops"><span>何もしないブロックを削除</span></label>
+            <label class="opt" title="片方の分岐が空の if-else を通常の if に置き換え、不要な空分岐を取り除きます。"><input type="checkbox" checked data-popt="simplifyIfElse"><span>空の if-else を if にする</span></label>
+            <label class="opt" title="同一のレポーター式を一時変数に保存して再利用します。再評価を減らす一方、変数への書き込み・読み取りが追加されます。"><input type="checkbox" checked data-popt="reuseReporters"><span>同じレポーターの値を再利用</span></label>
           </fieldset>
           <fieldset class="opt-group">
             <legend>名前と定数</legend>
-            <label class="opt"><input type="checkbox" checked data-popt="shortenIds"><span>内部 ID を短縮</span></label>
-            <label class="opt" title="内部 ID の短縮がオンのときだけ、名前も変わります。"><input type="checkbox" checked data-popt="renameStores"><span>変数・リスト名も短縮</span></label>
-            <label class="opt"><input type="checkbox" checked data-popt="freqIds"><span>頻出ブロックを短い ID に</span></label>
-            <label class="opt"><input type="checkbox" checked data-popt="compressProcs"><span>カスタムブロック名を短縮</span></label>
-            <label class="opt"><input type="checkbox" checked data-popt="foldConstants"><span>定数計算を畳み込む</span></label>
-            <label class="opt"><input type="checkbox" checked data-popt="propagateConstants"><span>定数変数を値に置換</span></label>
-            <label class="opt" title="非表示のモニターを削除し、その変数・リストを名前短縮や削除の対象にします。表示中のモニターは残ります（保存値は消去）。"><input type="checkbox" data-popt="removeMonitors"><span>モニターと位置を保持しない</span></label>
+            <label class="opt" title="ブロック・変数・リストなどの内部 ID を短縮します。画面に表示される名前は変わりません。"><input type="checkbox" checked data-popt="shortenIds"><span>内部 ID を短縮</span></label>
+            <label class="opt" title="変数名・リスト名の表示文字列を短縮します。内部 ID の短縮も有効な場合に働き、画面上の名前が変わります。"><input type="checkbox" checked data-popt="renameStores"><span>変数・リスト名も短縮</span></label>
+            <label class="opt" title="出現頻度の高いブロック種別に短い内部 ID を割り当て、project.json 内で繰り返される文字数を減らします。"><input type="checkbox" checked data-popt="freqIds"><span>頻出ブロックを短い ID に</span></label>
+            <label class="opt" title="カスタムブロックの定義名・呼び出し情報に含まれる名前を短縮します。表示されるブロック名も変わる場合があります。"><input type="checkbox" checked data-popt="compressProcs"><span>カスタムブロック名を短縮</span></label>
+            <label class="opt" title="入力がすべて定数の式を事前に計算し、式ブロックを計算結果に置き換えます。"><input type="checkbox" checked data-popt="foldConstants"><span>定数計算を畳み込む</span></label>
+            <label class="opt" title="値が変化しないと解析で証明できる変数の読み取りを、その定数値に置き換えます。"><input type="checkbox" checked data-popt="propagateConstants"><span>定数変数を値に置換</span></label>
+            <label class="opt" title="非表示の変数・リストモニターと保存位置を削除します。表示中のモニターは残りますが、設定や保存値は失われる場合があります。"><input type="checkbox" data-popt="removeMonitors"><span>モニターと位置を保持しない</span></label>
           </fieldset>
           <fieldset class="opt-group opt-group--danger">
             <legend>危険</legend>
             <p class="danger-note">保存値やフィールドの形を書き換えます。必要な場合だけオンにして、動作を確認してください。</p>
-            <label class="opt"><input type="checkbox" data-popt="clearInitialValues"><span>上書きされる初期値を空にする</span></label>
-            <label class="opt"><input type="checkbox" data-popt="normalizeTypes"><span>型と表現を正規化</span></label>
-            <label class="opt"><input type="checkbox" data-popt="stripNullFieldIds"><span>null のフィールドIDを削除</span></label>
+            <label class="opt" title="読み取られる前に必ず上書きされると判定した初期値を空にします。保存データを書き換えるため、必ず動作を確認してください。"><input type="checkbox" data-popt="clearInitialValues"><span>上書きされる初期値を空にする</span></label>
+            <label class="opt" title="保存値の一部を標準的な JSON 型・表現に書き換えます。元の表現に依存するプロジェクトや拡張機能では問題が起きる可能性があります。"><input type="checkbox" data-popt="normalizeTypes"><span>型と表現を正規化</span></label>
+            <label class="opt" title="ブロックフィールドにある null 値の ID 項目を削除します。保存されるフィールド構造が変わるため、利用する環境で確認してください。"><input type="checkbox" data-popt="stripNullFieldIds"><span>null のフィールドIDを削除</span></label>
           </fieldset>
         </div>
 
