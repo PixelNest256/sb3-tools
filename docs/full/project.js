@@ -338,6 +338,7 @@
         duplicates_extracted: 0, dup_blocks_saved: 0,
         near_duplicates_extracted: 0, near_blocks_saved: 0,
         ifelse_converted: 0, noop_procs_removed: 0, noop_calls_removed: 0,
+        constant_conditions_folded: 0, constant_branch_blocks_removed: 0,
         noop_receivers_removed: 0, noop_broadcasts_removed: 0,
         reporter_values_cached: 0, reporter_uses_reused: 0, temp_vars_created: 0,
         noop_messages_removed: 0, procs_inlined: 0, const_values_folded: 0,
@@ -1963,6 +1964,7 @@
         for (const tgt of targets) {
           if (isDict(tgt) && isDict(tgt.blocks) && Object.keys(tgt.blocks).length) {
             this._foldNumeric(tgt.blocks);
+            this._foldConstantConditionals(tgt.blocks);
           }
         }
       }
@@ -2424,6 +2426,143 @@
           if (changed) break;
         }
         if (!changed) break;
+      }
+    }
+
+    // Goboscript lowers compile-time boolean expressions (for example
+    // `"scratch" not in "goboscript"`) to ordinary Scratch reporter trees.
+    // Numeric folding alone leaves `if (1 == 1)` and its dead branch in the
+    // project. Evaluate only side-effect-free boolean operators over literal
+    // numeric operands, then splice the selected branch into the surrounding
+    // stack. Unknown/dynamic reporters are deliberately left untouched.
+    _constantBooleanInput(blocks, entry, seen) {
+      if (!isArr(entry)) return null;
+      for (let i = 1; i < entry.length; i++) {
+        const id = entry[i];
+        if (isStr(id) && has(blocks, id)) return this._constantBooleanBlock(blocks, id, seen);
+      }
+      const item = entry[1];
+      if (isArr(item) && item.length >= 2 && [4, 5, 6, 7, 8].includes(item[0])) {
+        return jsToNumber(item[1]) !== 0;
+      }
+      if (typeof item === "number") return jsToNumber(item) !== 0;
+      return null;
+    }
+
+    _constantBooleanBlock(blocks, id, seen) {
+      if (seen.has(id)) return null;
+      const blk = blocks[id];
+      if (!isDict(blk)) return null;
+      seen.add(id);
+      const inputs = blk.inputs || {};
+      const number = (key) => {
+        if (!(key in inputs) || !isArr(inputs[key]) || inputs[key].length < 2) return null;
+        const item = inputs[key][1];
+        if (isArr(item) && item.length >= 2 && [4, 5, 6, 7, 8].includes(item[0])) {
+          return jsToNumber(item[1]);
+        }
+        if (typeof item === "number") return jsToNumber(item);
+        return null;
+      };
+      const boolean = (key) => key in inputs ? this._constantBooleanInput(blocks, inputs[key], seen) : null;
+      switch (blk.opcode) {
+        case "operator_equals": {
+          const a = number("OPERAND1"), b = number("OPERAND2");
+          return a === null || b === null ? null : a === b;
+        }
+        case "operator_gt": {
+          const a = number("OPERAND1"), b = number("OPERAND2");
+          return a === null || b === null ? null : a > b;
+        }
+        case "operator_lt": {
+          const a = number("OPERAND1"), b = number("OPERAND2");
+          return a === null || b === null ? null : a < b;
+        }
+        case "operator_not": {
+          const value = boolean("OPERAND");
+          return value === null ? null : !value;
+        }
+        case "operator_and":
+        case "operator_or": {
+          const a = boolean("OPERAND1"), b = boolean("OPERAND2");
+          if (a === null || b === null) return null;
+          return blk.opcode === "operator_and" ? a && b : a || b;
+        }
+        default:
+          return null;
+      }
+    }
+
+    _foldConstantConditionals(blocks) {
+      const st = this.stats;
+      let changed = true;
+      while (changed) {
+        changed = false;
+        for (const [bid, blk] of Object.entries(blocks)) {
+          if (!isDict(blk) || (blk.opcode !== "control_if" && blk.opcode !== "control_if_else")) continue;
+          const inputs = blk.inputs || {};
+          const condition = inputs.CONDITION;
+          const conditionId = isArr(condition)
+            ? condition.slice(1).find((id) => isStr(id) && has(blocks, id)) : null;
+          if (!isStr(conditionId)) continue;
+          const value = this._constantBooleanBlock(blocks, conditionId, new Set());
+          if (value === null) continue;
+
+          const selectedKey = value ? "SUBSTACK" : "SUBSTACK2";
+          const selectedEntry = inputs[selectedKey];
+          const selectedId = isArr(selectedEntry)
+            ? selectedEntry.slice(1).find((id) => isStr(id) && has(blocks, id)) : null;
+          const nextId = isStr(blk.next) && has(blocks, blk.next) ? blk.next : null;
+          const parentId = isStr(blk.parent) && has(blocks, blk.parent) ? blk.parent : null;
+          const parent = parentId ? blocks[parentId] : null;
+          const selected = isStr(selectedId) ? this._collectSubgraph(blocks, selectedId, true) : new Set();
+          // Capture blocks owned by the conditional before linking the selected
+          // branch to the continuation; otherwise the newly linked continuation
+          // is accidentally included in this deletion set.
+          const owned = this._collectSubgraph(blocks, bid, false);
+          const selectedChain = isStr(selectedId) ? this._chainIds(blocks, selectedId, 100000) : [];
+          const selectedLast = selectedChain.length ? blocks[selectedChain[selectedChain.length - 1]] : null;
+          const replacement = isStr(selectedId) ? selectedId : nextId;
+          let linked = false;
+
+          if (isDict(parent)) {
+            if (parent.next === bid) { parent.next = replacement; linked = true; }
+            if (isDict(parent.inputs)) {
+              for (const entry of Object.values(parent.inputs)) {
+                if (isArr(entry) && entry.length > 1 && entry[1] === bid) {
+                  entry[1] = replacement;
+                  linked = true;
+                }
+              }
+            }
+          }
+
+          if (isStr(selectedId)) {
+            const first = blocks[selectedId];
+            if (isDict(first)) {
+              first.parent = linked ? parentId : null;
+              if (linked) delete first.topLevel;
+              else first.topLevel = true;
+              if (!linked) {
+                if (has(blk, "x")) first.x = blk.x;
+                if (has(blk, "y")) first.y = blk.y;
+              }
+            }
+            if (isDict(selectedLast)) selectedLast.next = nextId;
+            if (nextId && isDict(blocks[nextId])) {
+              blocks[nextId].parent = selectedChain.length ? selectedChain[selectedChain.length - 1] : parentId;
+            }
+          } else if (nextId && isDict(blocks[nextId])) {
+            blocks[nextId].parent = linked ? parentId : null;
+            if (!linked) blocks[nextId].topLevel = true;
+          }
+
+          for (const ownedId of owned) if (!selected.has(ownedId)) delete blocks[ownedId];
+          st.constant_conditions_folded += 1;
+          st.constant_branch_blocks_removed += owned.size - selected.size;
+          changed = true;
+          break;
+        }
       }
     }
 

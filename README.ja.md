@@ -62,7 +62,7 @@
   再利用は、書き換え後のコードで新しい削減箇所が見つからなくなるまで自動で
   繰り返します（最大 10 回）。前の回で書き換わったコードに残った削減箇所を、
   次の回で探せます。
-- **畳み込み。** 定数の四則演算を畳み込み、決して変わらない代入を伝播させます。
+- **畳み込み。** 定数の四則演算を畳み込み、決して変わらない代入を伝播させます。数値の定数比較と真偽値レポーターの木も評価し、定数条件の `if` / `if-else` を削除して選択された処理列を直接つなぎます。
 - **最小化。** JSON を最小化して zip を梱包し直します。
 
 `/sb3/` ページと `/full/` のプロジェクトデータ欄では、これらの処理を
@@ -218,14 +218,25 @@ Scratch VM とエディタが依存する不変条件を検証します。すべ
 入力やフィールドが削除済みの何かを指していないこと、初期値の空化が意味のある
 容量削減になるときだけ行われること。
 
+`build/check/goboscript-rules.mjs` は、Project Compressor と Full Compressor の両方で定数条件の畳み込みとスタックの再接続を検証します。実在する `.sb3` のパスを第1引数または `GOBOSCRIPT_SB3` 環境変数で渡すと、実プロジェクトの統合テストも実行します。どちらも指定しない場合は合成テストのみ実行します。
+
+`build/check/goboscript-runtime.mjs` は Scratch VM 上で圧縮前と定数条件の畳み込み後のプロジェクトを実行し、発話イベント、変数、リスト、スプライト状態を比較します。`if`／`if-else`、入れ子の論理レポーター、動的レポーター、数値シャドウ型を検証します。実行には、別のテスト用ディレクトリに `@scratch/scratch-vm` をインストールし、その `node_modules` を `NODE_PATH` に指定してください。実在する `.sb3` は `GOBOSCRIPT_SB3` または第1引数で追加できます。比較は決定的な乱数シードを使った有限時間の実行であり、あらゆる入力・実行経路の同等性を証明するものではありません。
+
+```console
+npm install --prefix /tmp/sb3-tools-runtime @scratch/scratch-vm
+NODE_PATH=/tmp/sb3-tools-runtime/node_modules node build/check/goboscript-runtime.mjs
+NODE_PATH=/tmp/sb3-tools-runtime/node_modules GOBOSCRIPT_SB3=/path/to/project.sb3 node build/check/goboscript-runtime.mjs
+```
+
 `build/check/watermark-invariants.mjs` は、Node の MD5 との一致、固定順の
 オプションビット、アセット ID／MD5 の更新、重複ではなく置換、冪等性、
 プロジェクト圧縮後の SVG バイト列を検証します。
 
-圧縮ツールまたは `docs/watermark.js` を触ったあとに両方を実行してください:
+圧縮ツールまたは `docs/watermark.js` を変更したあとに、次のチェックを実行してください:
 
 ```console
 node build/check/compress-invariants.mjs
+node build/check/goboscript-rules.mjs
 node build/check/watermark-invariants.mjs
 ```
 

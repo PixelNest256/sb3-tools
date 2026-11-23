@@ -6,8 +6,8 @@
 
 ## 検証環境
 
-- Scratch VM: `C:\Users\Kasam\AppData\Local\Temp\svm\node_modules\scratch-vm`
-- テストプロジェクト: `C:\Users\Kasam\Playground\sb3_compressor\test.sb3`
+- Scratch VM: ローカル環境にインストールされた `scratch-vm`（絶対パスは記録しない）
+- テストプロジェクト: 実行時に指定する SB3 fixture（`SB3_FIXTURE` 環境変数またはテストスクリプトの引数）
 - 現行実装: `docs/sb3/compressor.js`（提案1・2・4 実装後の作業ツリー。`docs/full/project.js` は同一内容）
 
 ## 確認点

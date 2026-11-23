@@ -64,7 +64,7 @@ Each tool has an English page and a Japanese page (`…/ja/`). Use `docs/sb3/`,
   automatically: those steps re-run on the rewritten code until a pass finds
   nothing new (at most 10 passes). Each pass can expose savings left behind by
   the previous one.
-- **Fold** constant arithmetic and propagate stores that never change.
+- **Fold** constant arithmetic and propagate stores that never change. Constant numeric comparisons and boolean reporter trees are evaluated too, so constant `if` / `if-else` branches are removed and the selected stack is spliced into place.
 - **Minify** the JSON and repack the zip.
 
 The `/sb3/` page and the project-data section of `/full/` group these passes
@@ -223,15 +223,26 @@ mutation keeps `tagName` and `children`, top-level blocks keep
 at something that was deleted, and initial-value blanking only happens when it
 saves a meaningful amount of JSON.
 
+`build/check/goboscript-rules.mjs` covers constant-condition folding and stack rewiring in both the project-only and Full Compressor engines. Pass a real `.sb3` path as the first argument or set `GOBOSCRIPT_SB3` to enable the real-project integration check; without either, only the synthetic tests run.
+
+`build/check/goboscript-runtime.mjs` executes original and folded projects in Scratch VM and compares speech events, variables, lists, and sprite state. It covers `if` / `if-else`, nested boolean reporters, dynamic reporters, and numeric shadow types. Install `@scratch/scratch-vm` in a separate test directory, then set `NODE_PATH` to that directory's `node_modules`. An optional real `.sb3` fixture can be supplied with `GOBOSCRIPT_SB3` or as the first argument. The comparison runs for a bounded interval with a deterministic random seed; it is a regression test, not a proof of equivalence for every possible input or execution path.
+
+```console
+npm install --prefix /tmp/sb3-tools-runtime @scratch/scratch-vm
+NODE_PATH=/tmp/sb3-tools-runtime/node_modules node build/check/goboscript-runtime.mjs
+NODE_PATH=/tmp/sb3-tools-runtime/node_modules GOBOSCRIPT_SB3=/path/to/project.sb3 node build/check/goboscript-runtime.mjs
+```
+
 `build/check/watermark-invariants.mjs` checks the watermark encoder against
 Node's MD5, the fixed option-bit order, the asset-ID/MD5 rewrite, replacement
 instead of duplication, idempotence, and the project compressor's final SVG
 bytes.
 
-Run both after touching the compressor or `docs/watermark.js`:
+Run these checks after touching the compressor or `docs/watermark.js`:
 
 ```console
 node build/check/compress-invariants.mjs
+node build/check/goboscript-rules.mjs
 node build/check/watermark-invariants.mjs
 ```
 

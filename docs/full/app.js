@@ -95,6 +95,8 @@
         noop_messages_removed: "dead messages removed",
         procs_inlined: "single-use definitions inlined",
         const_values_folded: "constant expressions folded",
+        constant_conditions_folded: "constant conditions folded",
+        constant_branch_blocks_removed: "blocks removed by constant branches",
         loops_created: "repeat loops created",
         loop_blocks_saved: "blocks saved by loops",
         const_vars_inlined: "constant variables inlined",
@@ -198,6 +200,8 @@
         noop_messages_removed: "不要なメッセージを削除",
         procs_inlined: "1回だけの定義を展開",
         const_values_folded: "定数計算を畳み込み",
+        constant_conditions_folded: "定数条件を畳み込み",
+        constant_branch_blocks_removed: "定数分岐で削除したブロック",
         loops_created: "repeat ループを作成",
         loop_blocks_saved: "ループで削減したブロック",
         const_vars_inlined: "定数変数を値に置換",
@@ -1002,7 +1006,10 @@
       ["unreachable blocks", s.unreachable_blocks_removed], ["duplicates", s.duplicates_extracted],
       ["near-duplicates", s.near_duplicates_extracted], ["loops", s.loops_created],
       ["reporters cached", s.reporter_values_cached],
-      ["folded values", s.const_values_folded], ["defs inlined", s.procs_inlined]
+      ["folded values", s.const_values_folded],
+      ["constant branches", s.constant_conditions_folded],
+      ["branch blocks removed", s.constant_branch_blocks_removed],
+      ["defs inlined", s.procs_inlined]
     ];
     return pick.filter(function (p) { return Number(p[1]) > 0; })
       .map(function (p) { return p[0] + " " + Number(p[1]).toLocaleString("en-US"); })

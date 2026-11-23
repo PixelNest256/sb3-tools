@@ -1,7 +1,6 @@
 // Test new compression features: dead assets, write-only, type normalization
 
 const fs = require('fs');
-const path = require('path');
 const JSZip = require('../../docs/sb3/jszip.min.js');
 const SB3 = require('../../docs/sb3/compressor.js');
 
@@ -9,7 +8,10 @@ async function testNewFeatures() {
   console.log('Testing new compression features...\n');
 
   // Load test project
-  const inputPath = 'C:/Users/Kasam/Playground/sb3_compressor/test.sb3';
+  const inputPath = process.argv[2] || process.env.SB3_FIXTURE;
+  if (!inputPath) {
+    throw new Error('Provide an SB3 fixture path: node build/check/test-new-features.cjs <fixture.sb3> or set SB3_FIXTURE.');
+  }
   const input = fs.readFileSync(inputPath);
   const zip = await JSZip.loadAsync(input);
   const projectJson = await zip.file('project.json').async('string');
