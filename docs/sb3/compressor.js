@@ -45,6 +45,25 @@
     "procedures_return"
   ]);
   const LITERAL_PRIMITIVE_TYPES = new Set([4, 5, 6, 7, 8, 10]);
+  // Scratch 3 core and Pen-extension menu shadows verified against @scratch/scratch-vm 15.3.0.
+  // Each listed block exposes a string-valued dropdown field consumed by its
+  // parent input, so its shadow can be represented by the standard text
+  // primitive [10, value]. Broadcast menus retain their VM-native [11, name, id].
+  const TEXT_MENU_SHADOW_FIELDS = new Map([
+    ["motion_goto_menu", "TO"],
+    ["motion_glideto_menu", "TO"],
+    ["motion_pointtowards_menu", "TOWARDS"],
+    ["looks_costume", "COSTUME"],
+    ["looks_backdrops", "BACKDROP"],
+    ["sound_sounds_menu", "SOUND_MENU"],
+    ["sound_effects_menu", "EFFECT"],
+    ["control_create_clone_of_menu", "CLONE_OPTION"],
+    ["sensing_distancetomenu", "DISTANCETOMENU"],
+    ["sensing_of_object_menu", "OBJECT"],
+    ["sensing_touchingobjectmenu", "TOUCHINGOBJECTMENU"],
+    ["sensing_keyoptions", "KEY_OPTION"],
+    ["pen_menu_colorParam", "COLOR_PARAM"]
+  ]);
   const SENSING_STAGE_PROPERTIES = new Set(["background #", "backdrop #", "backdrop name", "volume"]);
   const SENSING_SPRITE_PROPERTIES = new Set(["x position", "y position", "direction",
     "costume #", "costume name", "size", "volume"]);
@@ -310,6 +329,7 @@
     reuseReporters: true,
     stripComments: false,
     compactWorkspace: false,
+    compactMenuShadows: true,
     removeDeadAssets: false,
     removeWriteOnly: false,
     normalizeTypes: false,
@@ -336,7 +356,7 @@
       this.cancelled = typeof cancelled === "function" ? cancelled : () => false;
       this.stats = {
         blocks_renamed: 0, vars_renamed: 0, lists_renamed: 0, broadcasts_renamed: 0,
-        fields_removed: 0, monitors_updated: 0,
+        fields_removed: 0, monitors_updated: 0, menu_shadows_compacted: 0,
         vars_removed: 0, lists_removed: 0, procs_renamed: 0, args_renamed: 0,
         obscured_shadows_removed: 0, unreachable_blocks_removed: 0,
         unreachable_comments_removed: 0, broadcasts_removed: 0, procs_removed: 0,
@@ -2165,10 +2185,22 @@
               blk.opcode !== "event_broadcastandwait")) continue;
           let name = null, mid = null;
           const inp = (blk.inputs || {}).BROADCAST_INPUT;
-          if (isArr(inp) && inp.length > 1 && isArr(inp[1])) {
-            const arr = inp[1];
-            if (arr.length > 1 && isStr(arr[1])) name = arr[1];
-            if (arr.length > 2 && isStr(arr[2])) mid = arr[2];
+          if (isArr(inp) && inp.length > 1) {
+            if (isArr(inp[1])) {
+              const arr = inp[1];
+              if (arr.length > 1 && isStr(arr[1])) name = arr[1];
+              if (arr.length > 2 && isStr(arr[2])) mid = arr[2];
+            } else if (isStr(inp[1])) {
+              // Before primitive compaction, a broadcast input can still point
+              // at its event_broadcast_menu shadow block.
+              const menu = blocks[inp[1]];
+              const field = menu && menu.opcode === "event_broadcast_menu"
+                ? (menu.fields || {}).BROADCAST_OPTION : null;
+              if (isArr(field)) {
+                if (isStr(field[0])) name = field[0];
+                if (isStr(field[1])) mid = field[1];
+              }
+            }
           }
           if (!effective.has(messageKey(name, mid))) sends.push([blocks, bid]);
         }
@@ -5343,6 +5375,55 @@
         const p = blk.parent;
         if (isStr(p) && idMap.has(p)) blk.parent = idMap.get(p);
         else if (p === null || p === undefined) blk.parent = null;
+      }
+
+      if (this.options.compactMenuShadows) {
+      // Compact only tested Scratch 3 menu shadows with one parent input reference.
+      // Field dropdowns stored directly in parent.fields are not shadow blocks
+      // and therefore are outside this transformation.
+      const inputRefs = new Map();
+      for (const blk of Object.values(blocks)) {
+        if (!isDict(blk) || !isDict(blk.inputs)) continue;
+        for (const input of Object.values(blk.inputs)) {
+          if (!isArr(input)) continue;
+          for (let i = 1; i < input.length; i++) {
+            if (isStr(input[i])) inputRefs.set(input[i], (inputRefs.get(input[i]) || 0) + 1);
+          }
+        }
+      }
+      const compactableMenus = new Map();
+      const compactedMenuIds = [];
+      for (const [id, menu] of Object.entries(blocks)) {
+        const newId = idMap.get(id) || id;
+        if (!isDict(menu) || menu.shadow !== true ||
+            inputRefs.get(newId) !== 1 || !isStr(menu.parent) || !isDict(menu.fields)) continue;
+        if (menu.opcode === "event_broadcast_menu") {
+          const field = menu.fields.BROADCAST_OPTION;
+          if (!isArr(field) || !isStr(field[0]) || !isStr(field[1])) continue;
+          compactableMenus.set(newId, [11, field[0], field[1]]);
+          compactedMenuIds.push(id);
+          continue;
+        }
+        const fieldName = TEXT_MENU_SHADOW_FIELDS.get(menu.opcode);
+        const field = fieldName && menu.fields[fieldName];
+        if (!isArr(field) || !isStr(field[0])) continue;
+        compactableMenus.set(newId, [10, field[0]]);
+        compactedMenuIds.push(id);
+      }
+      if (compactableMenus.size) {
+        for (const blk of Object.values(blocks)) {
+          if (!isDict(blk) || !isDict(blk.inputs)) continue;
+          for (const input of Object.values(blk.inputs)) {
+            if (!isArr(input)) continue;
+            for (let i = 1; i < input.length; i++) {
+              const primitive = compactableMenus.get(input[i]);
+              if (primitive) input[i] = primitive;
+            }
+          }
+        }
+        for (const id of compactedMenuIds) delete blocks[id];
+        st.menu_shadows_compacted += compactableMenus.size;
+      }
       }
 
       st.blocks_renamed += counter[0];

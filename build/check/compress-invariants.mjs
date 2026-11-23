@@ -2374,6 +2374,111 @@ check(sent[1] === "go" && received[0] === "go" &&
     Object.values(receiver.broadcasts).every((b) => b[0] === "go"),
   "renameStores changed a broadcast display name; a name-only send no longer matches");
 
+
+/*
+ * 19. Scratch 3 core menu shadows and the Pen color-parameter menu are
+ *     converted only after runtime equivalence tests against Scratch VM 15.3.0.
+ *     String menus use [10, value]; broadcast menus use [11, name, id].
+ *     Field-only dropdowns are not shadow blocks and are not candidates here.
+ */
+const textMenuCases = [
+  ["motion_goto_menu", "TO", "motion_goto", "TO", "TargetB"],
+  ["motion_glideto_menu", "TO", "motion_glideto", "TO", "TargetB"],
+  ["motion_pointtowards_menu", "TOWARDS", "motion_pointtowards", "TOWARDS", "TargetB"],
+  ["looks_costume", "COSTUME", "looks_switchcostumeto", "COSTUME", "alt-costume"],
+  ["looks_backdrops", "BACKDROP", "looks_switchbackdropto", "BACKDROP", "alt-backdrop"],
+  ["sound_sounds_menu", "SOUND_MENU", "sound_play", "SOUND_MENU", "TestSound"],
+  ["sound_effects_menu", "EFFECT", "sound_seteffectto", "EFFECT", "PITCH"],
+  ["control_create_clone_of_menu", "CLONE_OPTION", "control_create_clone_of", "CLONE_OPTION", "_myself_"],
+  ["sensing_distancetomenu", "DISTANCETOMENU", "sensing_distanceto", "DISTANCETOMENU", "TargetB"],
+  ["sensing_of_object_menu", "OBJECT", "sensing_of", "OBJECT", "TargetB"],
+  ["sensing_touchingobjectmenu", "TOUCHINGOBJECTMENU", "sensing_touchingobject", "TOUCHINGOBJECTMENU", "_edge_"],
+  ["sensing_keyoptions", "KEY_OPTION", "sensing_keypressed", "KEY_OPTION", "space"],
+  ["pen_menu_colorParam", "COLOR_PARAM", "pen_setPenColorParamTo", "COLOR_PARAM", "saturation"]
+];
+const menuBlocks = {};
+for (let i = 0; i < textMenuCases.length; i++) {
+  const [menuOpcode, fieldName, parentOpcode, inputName, value] = textMenuCases[i];
+  const parentId = "menuParent" + i;
+  const menuId = "menuShadow" + i;
+  menuBlocks[parentId] = blk(parentOpcode, {
+    topLevel: true, x: i * 20, y: 0,
+    inputs: { [inputName]: [1, menuId] }
+  });
+  menuBlocks[menuId] = blk(menuOpcode, {
+    shadow: true, parent: parentId, fields: { [fieldName]: [value, null] }
+  });
+}
+menuBlocks.broadcastParent = blk("event_broadcast", {
+  topLevel: true, x: 0, y: 80, inputs: { BROADCAST_INPUT: [1, "broadcastMenu"] }
+});
+menuBlocks.broadcastMenu = blk("event_broadcast_menu", {
+  shadow: true, parent: "broadcastParent",
+  fields: { BROADCAST_OPTION: ["message-long-name", "broadcastLongId0001"] }
+});
+// Negative cases: custom menu opcodes, non-shadow blocks, and shared references
+// must remain intact rather than being rewritten speculatively.
+menuBlocks.unknownParent = blk("custom_parent", {
+  topLevel: true, x: 0, y: 120, inputs: { VALUE: [1, "unknownMenu"] }
+});
+menuBlocks.unknownMenu = blk("custom_dropdown_menu", {
+  shadow: true, parent: "unknownParent", fields: { VALUE: ["custom-value", null] }
+});
+menuBlocks.nonShadowParent = blk("motion_goto", {
+  topLevel: true, x: 0, y: 160, inputs: { TO: [1, "nonShadowMenu"] }
+});
+menuBlocks.nonShadowMenu = blk("motion_goto_menu", {
+  shadow: false, parent: "nonShadowParent", fields: { TO: ["TargetB", null] }
+});
+menuBlocks.sharedParentA = blk("motion_goto", {
+  topLevel: true, x: 0, y: 200, inputs: { TO: [1, "sharedMenu"] }
+});
+menuBlocks.sharedParentB = blk("motion_goto", {
+  topLevel: true, x: 0, y: 240, inputs: { TO: [1, "sharedMenu"] }
+});
+menuBlocks.sharedMenu = blk("motion_goto_menu", {
+  shadow: true, parent: "sharedParentA", fields: { TO: ["TargetB", null] }
+});
+const menuSource = {
+  targets: [{
+    isStage: false, name: "Menus", variables: {}, lists: {},
+    broadcasts: { broadcastLongId0001: ["message-long-name", null] },
+    blocks: menuBlocks, comments: {}, currentCostume: 0, costumes: [], sounds: [],
+    volume: 100, layerOrder: 1, visible: true, x: 0, y: 0, size: 100,
+    direction: 90, draggable: false, rotationStyle: "all around"
+  }],
+  monitors: [], extensions: [], meta: { semver: "3.0.0" }
+};
+const menuCompressed = SB3.compressProject(JSON.parse(JSON.stringify(menuSource)),
+  onlyOptions(["shortenIds", "renameStores", "compactMenuShadows"]), () => {});
+const menuMatrixTarget = menuCompressed.project.targets[0];
+for (let i = 0; i < textMenuCases.length; i++) {
+  const [menuOpcode, , parentOpcode, inputName, value] = textMenuCases[i];
+  const parentEntry = Object.entries(menuMatrixTarget.blocks).find(([, b]) =>
+    b && b.opcode === parentOpcode && b.inputs && b.inputs[inputName] &&
+    Array.isArray(b.inputs[inputName][1]));
+  const parent = parentEntry && parentEntry[1];
+  const primitive = parent && parent.inputs[inputName][1];
+  check(Array.isArray(primitive) && primitive[0] === 10 && primitive[1] === value,
+    menuOpcode + " was not replaced by its tested text primitive");
+  check(!!parentEntry && !Object.values(menuMatrixTarget.blocks).some((b) =>
+    b && b.opcode === menuOpcode && b.parent === parentEntry[0]),
+    menuOpcode + " shadow block was not removed from its parent input");
+}
+const broadcastParent = Object.values(menuMatrixTarget.blocks).find((b) => b && b.opcode === "event_broadcast");
+const broadcastPrimitive = broadcastParent.inputs.BROADCAST_INPUT[1];
+check(broadcastPrimitive[0] === 11 && broadcastPrimitive[1] === "message-long-name" &&
+    typeof broadcastPrimitive[2] === "string",
+  "event_broadcast_menu was not converted to the VM-native primitive with its broadcast ID");
+check(menuCompressed.stats.menu_shadows_compacted === textMenuCases.length + 1,
+  "menu shadow compaction statistics do not match the tested menu count");
+check(Object.values(menuMatrixTarget.blocks).some((b) => b && b.opcode === "custom_dropdown_menu") &&
+    Object.values(menuMatrixTarget.blocks).some((b) => b && b.opcode === "motion_goto_menu" && b.shadow !== true) &&
+    Object.values(menuMatrixTarget.blocks).some((b) => b && b.opcode === "motion_goto_menu" && b.shadow === true),
+  "unknown, non-shadow, or multiply referenced menu blocks were modified");
+check(JSON.stringify(menuCompressed.project).length < JSON.stringify(menuSource).length,
+  "menu shadow primitive conversion did not reduce project JSON size");
+
 if (failures) {
   console.error(`\n${failures} check(s) failed`);
   process.exit(1);

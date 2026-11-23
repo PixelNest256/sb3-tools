@@ -249,7 +249,8 @@
     removeWriteOnly: "Remove write-only variables",
     normalizeTypes: "Normalize types",
     stripNullFieldIds: "Strip null field IDs",
-    zeroTopLevelCoords: "Zero top-level coordinates"
+    zeroTopLevelCoords: "Zero top-level coordinates",
+    compactMenuShadows: "Compact tested menu shadows"
   };
   var MEDIA_LABELS = {
     pngOptimize: "OxiPNG after palette",
@@ -286,7 +287,8 @@
     removeWriteOnly: "書き込みだけの変数を削除",
     normalizeTypes: "型と表現を正規化",
     stripNullFieldIds: "null のフィールド ID を削除",
-    zeroTopLevelCoords: "トップレベル座標を 0 に"
+    zeroTopLevelCoords: "トップレベル座標を 0 に",
+    compactMenuShadows: "確認済みメニューシャドウを圧縮"
   };
   var MEDIA_LABELS_JA = {
     pngOptimize: "パレット後の OxiPNG",

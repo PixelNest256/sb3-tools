@@ -63,6 +63,7 @@
         monitors_removed: "hidden monitors removed",
         comments_removed: "comments removed",
         workspace_compacted: "workspace blocks re-flowed",
+        menu_shadows_compacted: "menu shadow blocks compacted",
         float_values_rounded: "long decimals rounded"
       },
       ready: "Ready",
@@ -168,6 +169,7 @@
         monitors_removed: "非表示モニターを削除",
         comments_removed: "コメントを削除",
         workspace_compacted: "ブロックの配置を再構成",
+        menu_shadows_compacted: "メニューシャドウを圧縮",
         float_values_rounded: "長い小数を丸め"
       },
       ready: "準備完了",
@@ -251,6 +253,7 @@
     reuseReporters: true,
     stripComments: false,
     compactWorkspace: false,
+    compactMenuShadows: true,
     removeDeadAssets: false,
     removeWriteOnly: false,
     normalizeTypes: false,
@@ -268,7 +271,7 @@
         "removeUnused", "dropObscuredShadows", "removeUnreachable"
       ]],
       ["cleanup", [
-        "renameStores", "compressProcs", "removeNoops", "simplifyIfElse", "inlineSingleCall",
+        "compactMenuShadows", "renameStores", "compressProcs", "removeNoops", "simplifyIfElse", "inlineSingleCall",
         "foldConstants", "propagateConstants"
       ]],
       ["optimize", [
@@ -313,6 +316,7 @@
   var KEY_STATS = [
     "blocks_renamed",
     "fields_removed",
+    "menu_shadows_compacted",
     "arg_ids_shortened",
     "unreachable_blocks_removed",
     "monitors_removed",

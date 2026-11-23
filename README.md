@@ -34,7 +34,7 @@ Every tool has English and Japanese pages; Japanese pages are under `/ja/`. The 
 
 ### Project-data optimization
 
-The project pass can shorten block and store IDs, remove unused data and default values, simplify code, fold constant expressions, and minify `project.json`. Presets range from conservative cleanup to **Maximum**, with individual options also available.
+The project pass can shorten block and store IDs, remove unused data and default values, simplify code, fold constant expressions, and minify `project.json`. The final-pass compressor removes tested Scratch 3 core menu shadows and the Pen extension's color-parameter menu: string-valued menus become standard text primitives `[10, value]`, while `event_broadcast_menu` uses the VM-native `[11, message name, message ID]` encoding. The supported menu opcodes are explicitly allowlisted and guarded by Scratch VM runtime-equivalence tests; unrecognized, extension-specific, or structurally unsafe menu shadows are preserved. Presets range from conservative cleanup to **Maximum**, with individual options also available.
 
 Monitors are preserved by default. Some transformations restructure scripts or alter stored data. Review each option and test the output in Scratch or TurboWarp; higher-impact transformations are separated from standard presets.
 
