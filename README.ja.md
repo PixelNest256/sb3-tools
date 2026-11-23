@@ -1,307 +1,150 @@
-# SB3 Tools
+<p align="center">
+  <img src="docs/readme-banner.svg" alt="SB3 Tools — Scratch / TurboWarp プロジェクト向けツール集" width="100%">
+</p>
 
-[English](README.md) · **日本語**
+<p align="center">
+  <a href="LICENSE"><img alt="MIT License" src="https://img.shields.io/github/license/PixelNest256/sb3-tools?style=for-the-badge&label=License"></a>
+  <a href="https://pixelnest256.github.io/sb3-tools/ja/"><img alt="Live demo" src="https://img.shields.io/badge/Live%20Demo-Open-e14b12?style=for-the-badge&logo=githubpages&logoColor=white"></a>
+</p>
 
-**Scratch / TurboWarp の `.sb3`** プロジェクト向けの、ブラウザだけで動くツール集です。
-圧縮ツールが3つ、解析ツールが1つ、検証・修復ツールが1つ、透かしチェッカーが1つ。すべてタブ内で完結し、
-アップロードもインストールも不要です。サイト自体にビルド手順はありません。
+**Scratch / TurboWarp のプロジェクトをブラウザ上で扱うツール集です。** `.sb3` の圧縮、構造の分析、破損データの修復、SB3 Tools の透かし確認ができます。アプリのインストールや、ローカルファイルのサーバーへのアップロードは不要です。
 
-**公開サイト:** <https://pixelnest256.github.io/sb3-tools/>
-· 日本語版: <https://pixelnest256.github.io/sb3-tools/ja/>
+[ウェブサイトを開く](https://pixelnest256.github.io/sb3-tools/ja/) · [English](README.md) · [MIT License](LICENSE)
+
+> ローカルのプロジェクトはブラウザ内で処理します。透かしチェッカーは公開 Scratch プロジェクトの ID / URL にも対応しており、この機能では公開プロキシ経由で Scratch からデータを取得します。
 
 ## ツール一覧
 
-| パス | ツール | 内容 |
+| ツール | 機能 | 開く |
 | --- | --- | --- |
-| `/sb3/` | **project.json Compressor** | 動作を変えずに `project.json` を小さくします。SVG コスチュームには小さな透かしが入り、それ以外のメディアはそのままコピーされます。 |
-| `/media/` | **SB3 Media Compressor** | コスチュームと音（PNG・JPEG・SVG・WAV・MP3）を再エンコードし、SVGO の後に SVG 透かしを入れます。`project.json` は形式変換か、透かし後の SVG の新しいアセット ID で変わります。 |
-| `/full/` | **SB3 Full Compressor** | 同じファイルに両方の処理を実行し、梱包は1回だけ行います。 |
-| `/analyzer/` | **SB3 Analyzer** | 容量とブロックがどこにあるかを表示し、Scratch の上限に対して警告します。何も書き出しません。 |
-| `/repair/` | **SB3 Repair** | プロジェクトを厳格に検証し、壊れた ZIP や `project.json` を復元します。ブロック参照・変数・アセット・モニターを修復し、読み込める `.sb3` を書き出します。 |
-| `/watermark/` | **SB3 Watermark Checker** | ローカルの `.sb3` または公開 Scratch プロジェクト ID から、各 SVG コスチュームの SB3 Tools 透かし（圧縮日時 UTC・元のプロジェクト名・ツールのバージョン・オプション）を読み取ります。JSON レポートだけを書き出します。 |
+| **Project Compressor** | `project.json` を最適化します。Scratch 互換の構造を保ち、メディアはそのままコピーします。 | [開く](https://pixelnest256.github.io/sb3-tools/sb3/ja/) |
+| **Media Compressor** | PNG・JPEG・SVG・WAV・MP3 のコスチュームや音声を最適化します。 | [開く](https://pixelnest256.github.io/sb3-tools/media/ja/) |
+| **Full Compressor** | プロジェクトデータとメディアの圧縮をまとめて実行します。 | [開く](https://pixelnest256.github.io/sb3-tools/full/ja/) |
+| **Analyzer** | プロジェクト JSON のサイズ、メディア、アセット、ブロック数を分析します。プロジェクトは変更しません。 | [開く](https://pixelnest256.github.io/sb3-tools/analyzer/ja/) |
+| **Repair** | 破損した SB3、JSON、ブロック参照、ストア、アセット情報などを検証し、可能な範囲で修復します。 | [開く](https://pixelnest256.github.io/sb3-tools/repair/ja/) |
+| **Watermark Checker** | ローカルまたは公開 Scratch プロジェクトの SVG コスチュームから透かし情報を読み取ります。 | [開く](https://pixelnest256.github.io/sb3-tools/watermark/ja/) |
 
-各ツールには英語ページと日本語ページ（`…/ja/`）があります。編集するときは
-`docs/sb3/`、`docs/media/`、`docs/full/`、`docs/analyzer/`、`docs/repair/`、
-`docs/watermark/` を触ってください。透かしのエンコーダーは共有の
-`docs/watermark.js` にあり、圧縮ページと Worker はそこから読み込みます。
+各ツールには英語ページと日本語ページ（`/ja/`）があります。サイトは静的ファイルで構成されており、実行時のビルドは不要です。
 
-## 圧縮の中身
+## どの圧縮ツールを使う？
 
-### プロジェクト処理 — `project.json`（動作はそのまま）
+- **Project Compressor** — プロジェクトデータを小さくしたい場合。画像・音声のデータには手を加えません。
+- **Media Compressor** — 容量の多くをコスチュームや音声が占めている場合。
+- **Full Compressor** — プロジェクトデータとメディアの両方を処理したい場合。
 
-- **ID の短縮。** ブロック ID を短い生成 ID に置き換えます。変数・リスト名、
-  カスタムブロックのプロッコードと引数は、対応するオプションが
-  オンのときだけ短縮されます。メッセージ名は常に元のままです。ID だけを
-  短縮した場合、名前はすべて元のままです。
-  変数・リストの ID はプロジェクト全体で一度だけ採番します。スプライトは
-  自分の表を先に、次にステージを引くため、2つの対象で ID が重なると参照が
-  静かに別の変数へ移ってしまうからです。名前はスコープごとに採番します。
-  ステージを最初に処理し、どこかで残す必要のある名前をすべて避けます。
-  ステージの名前は全スプライトから見えるためです。続いて各スプライトが
-  ステージの最終的な名前を避けます。スプライト同士でローカル名を共有しても
-  Scratch 上は合法で、最も短く収まります。未使用の変数・リストを削除しても
-  どちらの番号にも歯抜けは残りません。
-- **モニターの保持。** 既定では、モニターが表示している変数やリストは削除も
-  改名もされず、モニターの位置もそのままなので、ステージの見た目は変わりません。
-  「モニターと位置を保持しない」（**最大**プリセット）をオンにすると、非表示の
-  モニターを削除し、その変数・リストを名前短縮や削除の対象にできます。
-- **削除。** VM が復元する既定値のフィールド、隠れた入力の既定値、未使用の
-  変数とリスト、到達しないブロックとコメント、呼ばれない定義、死んだ
-  ブロードキャストを削除します。ステージ上で TurboWarp の高度な設定を
-  保存しているコメント（`// _twconfig_` で終わる行を含むもの）は、
-  コメント削除がオンのときも削除しません。
-- **再構成。** 繰り返すコードやほぼ同じコードを共有のカスタムブロックにまとめ、
-  連続する同じ処理を `repeat` ループにし、空の `if-else` を `if` にし、
-  1つのスクリプト内で同じレポーターを一時変数にまとめ、
-  1回しか使われない非 warp の定義を展開します。タイマー、2000年からの日数、
-  キー入力、マウス入力、他のスプライトなどを読むレポーターは、
-  「画面を再描画しない」定義の中でのみまとめます。
-  `control_stop`（このスクリプトを止める / スプライトの他のスクリプトを止める）
-  を含む部分は共有ブロックに移さず、インラインのまま残します。
-- **繰り返し。** 繰り返すコードの抽出、似たコードの統合、同じレポーターの値の
-  再利用は、書き換え後のコードで新しい削減箇所が見つからなくなるまで自動で
-  繰り返します（最大 10 回）。前の回で書き換わったコードに残った削減箇所を、
-  次の回で探せます。
-- **畳み込み。** 定数の四則演算を畳み込み、決して変わらない代入を伝播させます。数値の定数比較と真偽値レポーターの木も評価し、定数条件の `if` / `if-else` を削除して選択された処理列を直接つなぎます。
-- **最小化。** JSON を最小化して zip を梱包し直します。
+### プロジェクトデータの最適化
 
-`/sb3/` ページと `/full/` のプロジェクトデータ欄では、これらの処理を
-プリセット（**JSON クリーンアップのみ**、**見た目変化なし**、
-**コードクリーンアップ**、**コード最適化**、**速度優先**、**最大**）にまとめています。
-個別のオプションを変更すると、すぐに **カスタム** に切り替わります。
-`/full/` のプリセットはプロジェクトデータだけを変更し、メディアの強さは
-そのまま独立して保持されます。
+ブロック ID やストア ID の短縮、未使用データや既定値の削除、コードの整理、定数式の畳み込み、`project.json` の最小化などを行います。控えめな整理から **最大** までのプリセットに加え、個別のオプションも選択できます。
 
-**速度優先** は、最大と同じ整理・アセット削除機能を有効にしつつ、
-重複コードの抽出・類似コードの統合・繰り返しのループ化・レポーターの
-一時変数への保存と再読み込みを無効にします。これらはカスタムブロックや
-ループの呼び出し、一時変数への読み書きを増やし、実行速度に影響する可能性が
-あるためです。1回だけの定義の展開、何もしないブロックの削除、空の if-else
-の簡略化は、余分な実行処理を追加しないため有効のままです。
+既定ではモニターを保持します。コードの構造や保存データを変更する処理もあるため、各オプションの説明を確認し、出力を Scratch または TurboWarp でテストしてください。影響の大きい処理は通常のプリセットと分けています。
 
-**最大** では未使用アセットと書き込み専用ストアの削除も有効になりますが、
-安全条件があります。アセット削除は、コスチューム・サウンド・スプライトの
-すべての参照が直接わかる値のときだけ実行し、実行時に決まる名前や番号が
-1つでもあればアセット処理全体を中止します。書き込み専用の削除は、明示 ID と
-名前だけの参照の両方を解決し、変数とリストが同じ ID を共有していても
-別々に追跡します。初期値の消去・型の正規化・null フィールド ID の削除は
-**最大** でもオフのまま、**危険** グループにまとめています。保存値や
-フィールドの形を書き換えるため、使う前に動作確認をしてください。
+### メディアの最適化
 
-すべての処理は、シリアライズした JSON が実際に小さくなったときだけ採用され、
-Scratch VM が依存する目印（明示的な `parent: null` と、スタック末尾の
-`next: null`）は保持されます。
-
-### メディア処理 — コスチュームと音
-
-| アセット | 処理 |
+| 形式 | 処理 |
 | --- | --- |
-| PNG | **パレット**は 2〜256 色に減色してインデックス PNG を書き出す非可逆処理です（ディザリングは任意）。**無劣化（OxiPNG）**は画素を変えず、小さくならない場合は元の PNG を残します。**元のまま**は PNG をそのままコピーします。透過は保持されます。 |
-| JPEG | 指定した品質で **MozJPEG** により再エンコードします。ピクセル寸法は変えないので、回転中心はそのまま有効です。 |
-| SVG | **SVGO** で最適化し、**パレット**モードでは任意で同じピクセルサイズのパレット **PNG** に変換します（PNG の方が小さい場合）。幅または高さが 1px 未満の絵は 1px でラスタライズするため、PNG がゼロサイズになることはありません。 |
-| WAV | 帯域制限付きリサンプリング、任意でモノラルへのダウンミックス、または **MP3** への変換。 |
-| MP3 | ID3 タグの除去、またはより低いビットレートでの再エンコード（mpg123 → LAME）。 |
+| PNG | パレット減色（非可逆・ディザリング任意）、無劣化の OxiPNG 最適化、または元のまま。透過は保持します。 |
+| JPEG | 指定品質で MozJPEG により再エンコードします。ピクセル寸法は保持します。 |
+| SVG | SVGO による最適化。パレットモードでは PNG への変換も選択できます。 |
+| WAV | リサンプリング、任意のモノラル化、または MP3 への変換。 |
+| MP3 | ID3 タグの除去、または低いビットレートでの再エンコード。 |
 
-アセットの置き換えは、新しいバイト列が実際に小さくなったときだけ行います。
-WAV→MP3 と SVG→PNG の変換では、`project.json` のそのアセットの `assetId`、
-`md5ext`、`dataFormat` を書き換えます。SVG に透かしを入れた場合も、SVG の
-バイト列がそれ以外で変わっていなくても `assetId`/`md5ext` を更新します。ラスタライズしたコスチュームは回転中心を
-引き継ぎ、`bitmapResolution: 1` が付くので、Scratch 上では同じ大きさで描かれます。
-SVG を描画できなかった場合（ラスタ結果が空になった場合）は、SVG のまま残します。
+新しいデータが実際に小さくなる場合だけアセットを置き換えます。形式変換では `project.json` 内のアセット情報も更新します。パレット PNG は非可逆圧縮です。元のプロジェクトは必ず別に保管してください。
 
-SVG のラスタライズはページ側で行います。Worker は SVG をデコードできないため、
-Worker がタブに RGBA ピクセルを要求し、パレット PNG はタブ側で組み立てます。
+### SVG の透かし
 
-メディア圧縮はネストした Web Worker のプール（CPU コアごとに1つ、最大12）に
-分散するので、コスチュームの多いプロジェクトでも数倍速く終わります。ネスト
-Worker が使えない環境では、単一の Worker にフォールバックします。
+3つの圧縮ツールは、出力に残る参照済み SVG コスチュームに、表示されない小さな透かしを追加します。透かしには圧縮日時（UTC）、元のプロジェクトファイル名、ツールのバージョン、関連オプションが記録されます。SVG の `<desc>` 要素に格納されるため、見た目には影響しません。
 
-### 修復
+Watermark Checker は、透かしあり・なし・不正・混在を報告します。プロジェクト自体は変更しません。Scratch プロジェクトの URL / ID で検査できるのは、公開状態で取得可能なプロジェクトに限られます。
 
-`docs/repair/repair.js` は、ページと Node の検証で共有する独立したエンジンです。
-ZIP の中央ディレクトリだけに頼らずローカルヘッダーも走査するため、EOCD や
-中央ディレクトリが欠けたアーカイブも復元できます。`project.json` は BOM、
-NUL、Scratch 2.0 のバックスペース、生の制御文字、数値の先頭ゼロ、欠けた
-カンマ／末尾カンマ、閉じ引用符の欠落、オブジェクトを閉じる `]`、Python の
-`True`/`False`/`None`、単数形の `target` キー、途中で切れた JSON、
-大文字の `Project.json` などを段階的に復元してから、構造の修復に進みます。
+## Scratch の容量制限
 
-構造の修復では次を検証・修復します。
+Analyzer は、Scratch へのアップロード時に関係する次の上限を表示します。
 
-- ステージの有無と順序、ターゲットの既定値、layerOrder、各コンテナ
-- 存在しない `next`・`parent`・入力参照、入力の循環、`topLevel`/`shadow`、
-  不正なトップレベルプリミティブ
-- 未宣言の変数・リスト・ブロードキャスト（正しいスコープに作成）、
-  安全でないストア ID、モニターの参照
-- カスタムブロックの定義・プロトタイプ・mutation、定義のない呼び出し
-- アセットのメタデータ、不足・破損メディア（透明 PNG／無音 WAV の
-  プレースホルダー）、MD5 名への変更、回転中心、bitmapResolution、
-  音のサンプルレート／サンプル数
-- ブロックとモニターの opcode から推定した拡張機能の宣言
+- `project.json`：**5 MB**
+- 個別のメディアアセット：**10 MB**
 
-修復後は同じ厳格な検証器で再検証してからダウンロードを提供します。
-検証器は、読み込み・編集の信頼性を損なう「エラー」と、Scratch が許容する
-「警告」を分けて表示します。途中で切れた `project.json` の失われた末尾は
-復元できません。レポートに何を落としたかを表示します。
+これらは確認のための警告基準です。上限内であることが、正常動作を保証するわけではありません。
 
-### 透かし
+## ローカルで実行する
 
-3つの圧縮ツールは、出力に残る参照済みの SVG コスチュームすべてに
-小さな透かしを入れます。統合圧縮とメディア圧縮は SVGO の後に透かしを入れるため、
-最適化で消えることはありません。ルートの `<svg>` 要素の最後の子として入る、
-表示されない `<desc>` 要素なので、描画に影響せず、通常のプロジェクト保存でも
-アセットがそのままコピーされます:
+ウェブサイトのプレビューに依存関係のインストールは不要です。リポジトリのルートで実行します。
 
-```xml
-<desc id="sb3tools-watermark">SB3TOOLS-WATERMARK:1:<base64(JSON)></desc>
+```sh
+python -m http.server 8000 --directory docs
 ```
 
-XML コメントや `<metadata>` ではなく `<desc>` を使うのは、Scratch の SVG
-サニタイザーがコメントを削除し、`scratch-svg-renderer` が読み込み時に
-`<metadata>` の中身を空にするためです。`<desc>` はどちらの経路でも残り、
-SVGO の既定設定でも保持されます。ペイロードは `s`（スキーマ）、
-`k`（`project`・`media`・`full`）、`t`（UTC 日時）、`n`（元のファイル名）、
-`v`（ツールのバージョン）、`o`（プロジェクトオプションのビット列）、
-メディア圧縮・統合圧縮ではさらに `m`（メディアオプションのビット列）
-を持つ JSON です。ビット列は `docs/watermark.js` が公開する固定順で、最下位
-ビットから詰めます。プロジェクト圧縮は26個、メディア圧縮・統合圧縮はさらに
-7個のメディアフラグを持ち、チェッカーは両方を復号します。
+その後、<http://localhost:8000/> を開きます。HTTP で配信すると Web Worker が利用でき、圧縮中もページの応答性を保てます。`file://` で直接開いた場合、メインスレッドで処理するモードに切り替わることがあります。
 
-SVG のバイト列が変わると MD5 も変わるため、圧縮ツールは同じ旧アセットを
-共有していたすべてのコスチュームの `assetId`/`md5ext` を更新します。既存の
-透かしは新しいものを入れる前に除去するので、同じ情報での再圧縮は冪等になり、
-情報が変わっていれば古いペイロードを置き換えます。統合圧縮とメディア圧縮は
-メディア圧縮の後に透かしを入れるため、その工程の SVGO で消えることはありません。
+## 開発者向け情報
 
-通常の Scratch / TurboWarp の保存では残ります。独自の強い SVGO 設定で SVG を
-書き換えるツールでは `<desc>` が消える可能性はあります。`/watermark/` の
-チェッカーは、プロジェクトを変更せずに、透かしあり・なし・不正・混在を報告します。
-以前の XML コメント形式の透かしも読み取れ、次回の圧縮時に `<desc>` 形式へ
-置き換わります。
+### リポジトリ構成
 
-チェッカーには公開 Scratch プロジェクトの ID または URL も入力できます。
-TurboWarp の公開 trampoline プロキシでプロジェクトトークンを取得し、
-`project.json` と参照されている SVG アセットを Scratch からダウンロードして、
-同じ検査を行います。非公開プロジェクトは対象外で、トークンは JSON レポートに
-含めません。
-
-### Analyzer
-
-- **`project.json` のサイズ**（Scratch の 5 MB 上限に対するバー付き）。
-- **スプライトごとのメディア容量とアセット数**（容量の割合と件数の割合）、
-  アセット単体 10 MB 超過の警告、大きいアセットの一覧、参照されていない
-  ファイルの一覧。
-- **スプライトごとのブロック数**と、全体に占める割合。
-
-## リポジトリ構成
-
-```
-docs/                 サイト全体（GitHub Pages はこのフォルダを配信）
-  index.html          ランディングページ（英語）  · スタイル: home.css
-  ja/index.html       ランディングページ（日本語）
-  sb3/                project.json Compressor (+ ja/)
-  media/              SB3 Media Compressor    (+ ja/)
-  full/               SB3 Full Compressor     (+ ja/)
-  analyzer/           SB3 Analyzer            (+ ja/)
-  repair/             SB3 Repair              (+ ja/)
-  watermark/          SB3 Watermark Checker   (+ ja/)
-  watermark.js        共有の透かしエンコーダー／デコーダー
-  .nojekyll           Jekyll に触らせないための空ファイル
-  <tool>/             index.html · app.js · worker.js · styles.css · …
-                      media/ と full/ は vendor/ のコーデックも持ちます
-build/media/          同梱コーデックを作る esbuild スクリプト（開発用）
-build/check/          プロジェクト処理の回帰チェック（開発用）
-LICENSE               MIT
+```text
+docs/                   静的サイトとブラウザツール
+├── index.html          英語のトップページ
+├── ja/index.html       日本語のトップページ
+├── sb3/                Project Compressor
+├── media/              Media Compressor と同梱コーデック
+├── full/               Full Compressor と同梱コーデック
+├── analyzer/           Analyzer
+├── repair/             Repair
+├── watermark/          Watermark Checker
+└── watermark.js        共有の透かしエンコーダー／デコーダー
+build/
+├── media/              コーデックのビルドスクリプトと依存関係
+└── check/              回帰テスト・不変条件チェック
+README.md               英語ドキュメント
+README.ja.md            日本語ドキュメント
+LICENSE                 MIT License
 ```
 
-Node が必要なのは `build/` だけです。サイトは静的ファイルのみで動きます。
+サイト本体は HTML・CSS・JavaScript の静的ファイルです。ビルド済みコーデックは `docs/media/vendor/` と `docs/full/vendor/` に含まれているため、通常のチェックアウトでは再生成する必要はありません。
 
-## 回帰チェック
+### 同梱コーデックの再生成
 
-`build/check/compress-invariants.mjs` は小さな合成プロジェクトを圧縮し、
-Scratch VM とエディタが依存する不変条件を検証します。すべてのブロック変更で
-`tagName` と `children` が保たれること、トップレベルのブロックが
-`parent: null` を持つこと、到達可能なスタック末尾が `next: null` を持つこと、
-入力やフィールドが削除済みの何かを指していないこと、初期値の空化が意味のある
-容量削減になるときだけ行われること。
+メディアコーデックの依存関係を更新するときだけ実行します。
 
-`build/check/goboscript-rules.mjs` は、Project Compressor と Full Compressor の両方で定数条件の畳み込みとスタックの再接続を検証します。実在する `.sb3` のパスを第1引数または `GOBOSCRIPT_SB3` 環境変数で渡すと、実プロジェクトの統合テストも実行します。どちらも指定しない場合は合成テストのみ実行します。
-
-`build/check/goboscript-runtime.mjs` は Scratch VM 上で圧縮前と定数条件の畳み込み後のプロジェクトを実行し、発話イベント、変数、リスト、スプライト状態を比較します。`if`／`if-else`、入れ子の論理レポーター、動的レポーター、数値シャドウ型を検証します。実行には、別のテスト用ディレクトリに `@scratch/scratch-vm` をインストールし、その `node_modules` を `NODE_PATH` に指定してください。実在する `.sb3` は `GOBOSCRIPT_SB3` または第1引数で追加できます。比較は決定的な乱数シードを使った有限時間の実行であり、あらゆる入力・実行経路の同等性を証明するものではありません。
-
-```console
-npm install --prefix /tmp/sb3-tools-runtime @scratch/scratch-vm
-NODE_PATH=/tmp/sb3-tools-runtime/node_modules node build/check/goboscript-runtime.mjs
-NODE_PATH=/tmp/sb3-tools-runtime/node_modules GOBOSCRIPT_SB3=/path/to/project.sb3 node build/check/goboscript-runtime.mjs
-```
-
-`build/check/watermark-invariants.mjs` は、Node の MD5 との一致、固定順の
-オプションビット、アセット ID／MD5 の更新、重複ではなく置換、冪等性、
-プロジェクト圧縮後の SVG バイト列を検証します。
-
-圧縮ツールまたは `docs/watermark.js` を変更したあとに、次のチェックを実行してください:
-
-```console
-node build/check/compress-invariants.mjs
-node build/check/goboscript-rules.mjs
-node build/check/watermark-invariants.mjs
-```
-
-## 同梱コーデック
-
-`docs/media/vendor/` と `docs/full/vendor/` には、ビルド済みのブラウザ用
-バンドル（素の IIFE スクリプト。遅延読み込み）が入っています。リポジトリに
-コミット済みなので、通常のチェックアウトでは何も追加で用意する必要はありません。
-
-| バンドル | ライブラリ | ライセンス |
-| --- | --- | --- |
-| `jpeg.js` + `mozjpeg_enc.wasm` | @jsquash/jpeg — MozJPEG | Apache-2.0 |
-| `oxipng.js` + `oxipng_bg.wasm` | @jsquash/oxipng — OxiPNG | Apache-2.0 |
-| `mp3.js` | wasm-media-encoders — LAME | ラッパーは MIT、LAME は LGPL-2.1 |
-| `mp3dec.js` | mpg123-decoder — mpg123 | ラッパーは MIT、mpg123 は LGPL-2.1 |
-| `svgo.js` | SVGO | MIT |
-
-詳しくは `docs/media/vendor/LICENSE.md` を参照してください。作り直すには:
-
-```console
+```sh
 cd build/media
 npm install
 node build.mjs
 ```
 
-## ローカルで確認
+Media Compressor と Full Compressor 用のブラウザバンドルと WASM ファイルを生成します。`npm install` にはネットワーク接続が必要です。
 
-```console
-python -m http.server 8000 --directory docs
+### 回帰テスト
+
+各チェックは独立した Node スクリプトです。ルートでの `npm install` は必要ありません。圧縮・修復・透かし処理を変更したときは、関連するチェックを実行してください。
+
+```sh
+node build/check/compress-invariants.mjs
+node build/check/media-invariants.mjs
+node build/check/option-tooltip-invariants.mjs
+node build/check/preset-invariants.mjs
+node build/check/repair-invariants.mjs
+node build/check/watermark-invariants.mjs
+node build/check/goboscript-rules.mjs
 ```
 
-その後 <http://localhost:8000/> を開きます。HTTP で配信することをおすすめします。
-圧縮中もページが固まらないよう Web Worker が動くためです。ファイルを直接
-開いても動きますが、その場合はメインのタブで圧縮処理が実行されます。
+`goboscript-rules.mjs` は、第1引数または `GOBOSCRIPT_SB3` に実在する `.sb3` のパスを指定すると、実プロジェクトを使ったテストも実行します。指定がない場合は合成データでテストします。
 
-## 公開
+Scratch VM による任意の実行比較には、別ディレクトリへの `@scratch/scratch-vm` のインストールが必要です。
 
-GitHub Pages は **Deploy from a branch → `main` / `docs`** に設定されています。
-`main` に push すると `https://<user>.github.io/sb3-tools/`（日本語は `/ja/`）が
-再ビルドされます。
+```sh
+npm install --prefix /tmp/sb3-tools-runtime @scratch/scratch-vm
+NODE_PATH=/tmp/sb3-tools-runtime/node_modules node build/check/goboscript-runtime.mjs
+```
 
-## 注意点
+実プロジェクトは `GOBOSCRIPT_SB3` または第1引数で指定できます。この比較は選択されたケースの回帰テストであり、すべてのプロジェクト・実行経路での同等性を証明するものではありません。
 
-- **PNG のパレット圧縮は非可逆です。** 元の `.sb3` は必ずコピーを残してください。
-  プロジェクト処理も一方通行で、元の ID や名前を出力から復元することはできません。
-  SVG→PNG は PNG の**パレット**モードでのみ動作し、ベクターのコスチュームを
-  現在のピクセルサイズのパレット PNG にします。どの倍率でもくっきりさせたい
-  場合はオフにしてください。
-- Scratch の上限は `project.json` が 5 MB、アセット単体が 10 MB です。
-  Analyzer はこれを超えたものを警告します。アセットの数に上限はありません。
-- **無劣化（OxiPNG）** は最も遅い PNG モードです。色数を減らさず、最適化で
-  小さくならない場合は元の PNG を残します。画素を変えたくないときに選んでください。
-- 音声について: Scratch が再生できるのは WAV と MP3 だけなので、WAV は
-  リサンプリングするか MP3 に変換するかのどちらかで、Scratch が読めない形式に
-  することはありません。
-- ページをディスクから開くと（`file://`）Web Worker が使えないため、ツールは
-  メインのタブで動くモードにフォールバックします。
+## 注意事項
+
+- 圧縮・修復の前に、元の `.sb3` のコピーを保管してください。処理は元に戻せません。
+- パレット PNG への変換は非可逆です。画素を変えたくない場合は無劣化の OxiPNG、または元のままを選んでください。
+- SVG から PNG への変換では、ベクター画像が指定ピクセルサイズのラスター画像になります。
+- Repair は一部の ZIP / JSON 構造を復元できますが、途中で切れたファイルから失われたデータは復元できません。
+- 圧縮・修復後のプロジェクトは、共有する前に Scratch または TurboWarp で動作確認してください。
 
 ## ライセンス
 
-[MIT License](LICENSE) で配布しています。
+SB3 Tools は [MIT License](LICENSE) のもとで配布しています。サードパーティ製コーデックのライセンス表記は `docs/media/vendor/LICENSE.md` を参照してください。

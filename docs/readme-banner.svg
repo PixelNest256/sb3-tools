@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="320" viewBox="0 0 1200 320" role="img" aria-labelledby="title desc">
+  <title id="title">SB3 Tools</title>
+  <desc id="desc">SB3 Tools banner using the website's paper, ink, and signal-orange palette and its favicon mark.</desc>
+  <rect width="1200" height="320" fill="#e7e8e1"/>
+  <path d="M0 18H1200M0 302H1200" stroke="#a9ac9f" stroke-width="1"/>
+  <g transform="translate(76 68)">
+    <rect width="184" height="184" fill="#171a16"/>
+    <rect x="34" y="34" width="116" height="34" fill="#e7e8e1"/>
+    <rect x="34" y="88" width="64" height="62" fill="#e14b12"/>
+    <rect x="112" y="88" width="38" height="62" fill="#565a4e"/>
+  </g>
+  <path d="M316 70V250" stroke="#e14b12" stroke-width="5"/>
+  <g fill="#171a16">
+    <text x="358" y="158" font-family="Barlow Condensed, Arial Narrow, sans-serif" font-size="104" font-weight="700" letter-spacing="-1">SB3 Tools</text>
+  </g>
+  <text x="364" y="204" fill="#4e5348" font-family="IBM Plex Mono, Consolas, monospace" font-size="19" font-weight="500" letter-spacing="3">BROWSER UTILITIES FOR SCRATCH &amp; TURBOWARP</text>
+  <path d="M364 232H1124" stroke="#a9ac9f" stroke-width="1"/>
+  <text x="364" y="265" fill="#4e5348" font-family="IBM Plex Mono, Consolas, monospace" font-size="14" letter-spacing="2">COMPRESS  /  ANALYZE  /  REPAIR  /  INSPECT</text>
+  <g transform="translate(1068 70)">
+    <rect width="56" height="8" fill="#171a16"/>
+    <rect y="16" width="36" height="8" fill="#e14b12"/>
+    <rect y="32" width="20" height="8" fill="#565a4e"/>
+  </g>
+</svg>
