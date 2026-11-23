@@ -339,7 +339,7 @@
         near_duplicates_extracted: 0, near_blocks_saved: 0,
         ifelse_converted: 0, noop_procs_removed: 0, noop_calls_removed: 0,
         constant_conditions_folded: 0, constant_branch_blocks_removed: 0,
-        noop_receivers_removed: 0, noop_broadcasts_removed: 0,
+        noop_receivers_removed: 0, noop_broadcasts_removed: 0, orphan_receivers_removed: 0, broadcast_names_renamed: 0,
         reporter_values_cached: 0, reporter_uses_reused: 0, temp_vars_created: 0,
         noop_messages_removed: 0, procs_inlined: 0, const_values_folded: 0,
         loops_created: 0, loop_blocks_saved: 0,
@@ -926,6 +926,66 @@
         taken.add(id);
         return id;
       };
+
+      // A reporter-connected broadcast input can produce any message at runtime.
+      // Keep every visible label in that case; only shorten names when all senders
+      // can be resolved to a literal menu value.
+      const knownBroadcastIds = new Set();
+      for (const target of targets) {
+        const definitions = isDict(target) && isDict(target.broadcasts) ? target.broadcasts : {};
+        for (const id of Object.keys(definitions)) knownBroadcastIds.add(id);
+      }
+      let canShortenNames = this.options.renameStores !== false;
+      for (const tgt of targets) {
+        if (!isDict(tgt) || !isDict(tgt.blocks)) continue;
+        for (const blk of Object.values(tgt.blocks)) {
+          if (!isDict(blk) || (blk.opcode !== "event_broadcast" &&
+              blk.opcode !== "event_broadcastandwait")) continue;
+          const input = (blk.inputs || {}).BROADCAST_INPUT;
+          if (!isArr(input) || input.length < 2) {
+            canShortenNames = false;
+            break;
+          }
+          const value = input[1];
+          if (isArr(value)) {
+            if (value[0] !== 11 || !isStr(value[1]) ||
+                (isStr(value[2]) && !knownBroadcastIds.has(value[2]))) canShortenNames = false;
+          } else if (isStr(value)) {
+            const menu = tgt.blocks[value];
+ const field = menu && menu.opcode === "event_broadcast_menu"
+                ? (menu.fields || {}).BROADCAST_OPTION : null;
+            if (!isArr(field) || !isStr(field[0]) ||
+                (isStr(field[1]) && !knownBroadcastIds.has(field[1]))) canShortenNames = false;
+          } else {
+            canShortenNames = false;
+          }
+          if (!canShortenNames) break;
+        }
+        if (!canShortenNames) break;
+      }
+
+      const shortNames = new Map();
+      const occupiedNames = new Set();
+      for (const mapping of this.varMap.values()) occupiedNames.add(mapping[1]);
+      for (const mapping of this.listMap.values()) occupiedNames.add(mapping[1]);
+      for (const plan of this.storePlanByTarget.values()) {
+        for (const mapping of plan.varMap.values()) occupiedNames.add(mapping[1]);
+        for (const mapping of plan.listMap.values()) occupiedNames.add(mapping[1]);
+      }
+      let nameSeq = 0;
+      const nextName = (name) => {
+        if (!canShortenNames || !isStr(name)) return name;
+        if (!shortNames.has(name)) {
+          let candidate;
+          do {
+            candidate = encodeId(++nameSeq);
+          } while (occupiedNames.has(candidate));
+          occupiedNames.add(candidate);
+          shortNames.set(name, candidate);
+        }
+        return shortNames.get(name);
+      };
+
       this.bcMap = new Map();
       this.bcByName = new Map();
       for (const tgt of targets) {
@@ -934,12 +994,13 @@
         for (const [bid, ent] of Object.entries(broadcasts)) {
           const name = isArr(ent) && ent.length ? ent[0] : ent;
           const short = nextId();
-          const mapping = [short, name];
+          const mapping = [short, nextName(name)];
           this.bcMap.set(bid, mapping);
           if (!this.bcByName.has(name)) this.bcByName.set(name, mapping);
         }
       }
       this.stats.broadcasts_renamed = this.bcMap.size;
+      this.stats.broadcast_names_renamed = canShortenNames ? shortNames.size : 0;
     }
 
     // `_collect` numbers every store, including the ones that `removeUnused`
@@ -1272,6 +1333,7 @@
       let qhead = 0;
       const sentIds = new Set();
       const sentNames = new Set();
+      let unknownBroadcastSend = false;
       const enqueue = (ti, bid) => {
         if (isStr(bid) && ti >= 0 && ti < blocksByTi.length &&
             has(blocksByTi[ti], bid) && !reachable[ti].has(bid)) {
@@ -1346,6 +1408,22 @@
             }
           }
           if (op === "event_broadcast" || op === "event_broadcastandwait") {
+            const broadcastInput = (blk.inputs || {}).BROADCAST_INPUT;
+            if (!isArr(broadcastInput) || broadcastInput.length < 2) {
+              unknownBroadcastSend = true;
+            } else {
+              const broadcastValue = broadcastInput[1];
+              if (isArr(broadcastValue)) {
+ if (broadcastValue[0] !== 11 || !isStr(broadcastValue[1])) unknownBroadcastSend = true;
+              } else if (isStr(broadcastValue)) {
+                const menu = blocksByTi[ti][broadcastValue];
+ const field = menu && menu.opcode === "event_broadcast_menu"
+ ? (menu.fields || {}).BROADCAST_OPTION : null;
+                if (!isArr(field) || !isStr(field[0])) unknownBroadcastSend = true;
+              } else {
+                unknownBroadcastSend = true;
+              }
+            }
             addBroadcastValue(blk.inputs, ti);
             addBroadcastValue(blk.fields, ti);
           }
@@ -1357,7 +1435,7 @@
         let activated = false;
         for (const [ti, bid, bidId, name] of receivers) {
           if (reachable[ti].has(bid)) continue;
-          if ((bidId !== null && sentIds.has(bidId)) ||
+          if (unknownBroadcastSend || (bidId !== null && sentIds.has(bidId)) ||
               (name !== null && sentNames.has(name))) {
             enqueue(ti, bid);
             activated = true;
@@ -1421,7 +1499,7 @@
         const out = {};
         for (const [bid, ent] of Object.entries(tgt.broadcasts)) {
           const name = isArr(ent) && ent.length ? ent[0] : ent;
-          if ((isStr(bid) && usedBcIds.has(bid)) ||
+          if (unknownBroadcastSend || (isStr(bid) && usedBcIds.has(bid)) ||
               (isStr(name) && usedBcNames.has(name))) {
             out[bid] = ent;
           }
@@ -1951,6 +2029,7 @@
           }
         }
         this._removeNoopBroadcasts(project);
+        if (o.removeUnreachable) this._removeUnreachable(project);
       }
       if (o.inlineSingleCall) {
         for (const tgt of targets) {
@@ -2132,6 +2211,7 @@
 
       const effective = new Set();
       const noopReceivers = [];
+      const effectiveReceivers = [];
       for (const tgt of targets) {
         if (!isDict(tgt) || !isDict(tgt.blocks)) continue;
         const blocks = tgt.blocks;
@@ -2142,7 +2222,12 @@
           const name = isStr(fv[0]) ? fv[0] : null;
           const mid = fv.length > 1 && isStr(fv[1]) ? fv[1] : null;
           if (this._chainIsNoop(blocks, blk.next)) noopReceivers.push([blocks, bid]);
-          else effective.add(messageKey(name, mid));
+          else {
+            const key = messageKey(name, mid);
+            effective.add(key);
+            if (name !== null) effective.add(name);
+            effectiveReceivers.push([blocks, bid, key, name]);
+          }
         }
       }
       for (const [blocks, hatId] of noopReceivers) {
@@ -2151,12 +2236,14 @@
       }
 
       const sends = [];
+      const sentMessages = new Set();
+      let dynamicSend = false;
       for (const tgt of targets) {
         if (!isDict(tgt) || !isDict(tgt.blocks)) continue;
         const blocks = tgt.blocks;
         for (const [bid, blk] of Object.entries(blocks)) {
           if (!isDict(blk) || (blk.opcode !== "event_broadcast" &&
-              blk.opcode !== "event_broadcastandwait")) continue;
+ blk.opcode !== "event_broadcastandwait")) continue;
           let name = null, mid = null;
           const inp = (blk.inputs || {}).BROADCAST_INPUT;
           if (isArr(inp) && inp.length > 1 && isArr(inp[1])) {
@@ -2164,11 +2251,26 @@
             if (arr.length > 1 && isStr(arr[1])) name = arr[1];
             if (arr.length > 2 && isStr(arr[2])) mid = arr[2];
           }
-          if (!effective.has(messageKey(name, mid))) sends.push([blocks, bid]);
+          if (name === null && mid === null) {
+            dynamicSend = true;
+            continue;
+          }
+          const key = messageKey(name, mid);
+          sentMessages.add(key);
+          if (name !== null) sentMessages.add(name);
+          if (!effective.has(key) && (name === null || !effective.has(name))) sends.push([blocks, bid]);
         }
       }
       for (const [blocks, bid] of sends) {
         if (this._spliceOut(blocks, bid)) st.noop_broadcasts_removed += 1;
+      }
+
+      if (!dynamicSend) {
+        for (const [blocks, hatId, key, name] of effectiveReceivers) {
+          if (sentMessages.has(key) || (name !== null && sentMessages.has(name))) continue;
+          delete blocks[hatId];
+          st.orphan_receivers_removed += 1;
+        }
       }
 
       // A message definition is the only place a broadcast id lives.  When
@@ -2342,6 +2444,17 @@
       return jsToNumber(item);
     }
 
+    _literalString(entry) {
+      if (!isArr(entry) || entry.length < 2) return null;
+      const item = entry[1];
+      if (isArr(item)) {
+        if (item.length < 2 || !LITERAL_PRIMITIVE_TYPES.has(item[0])) return null;
+        return String(item[1]);
+      }
+      if (typeof item === "number" || typeof item === "boolean") return String(item);
+      return null;
+    }
+
     _evalFoldable(blk) {
       const op = blk.opcode;
       const inputs = blk.inputs || {};
@@ -2357,9 +2470,7 @@
         if (op === "operator_multiply") return left * right;
         if (op === "operator_divide") return left / right;
         let result = left % right;
-        if (!Number.isNaN(result)) {
-          if (result / right < 0) result += right;
-        }
+        if (!Number.isNaN(result) && result / right < 0) result += right;
         return result;
       }
       if (op === "operator_round") {
@@ -2377,65 +2488,105 @@
         if (name === "floor") return Math.floor(value);
         if (name === "ceiling") return Math.ceil(value);
         if (name === "sqrt") return Math.sqrt(value);
+        if (name === "sin") return Math.sin(value * Math.PI / 180);
+        if (name === "cos") return Math.cos(value * Math.PI / 180);
+        if (name === "tan") return Math.tan(value * Math.PI / 180);
+        if (name === "asin") return Math.asin(value) * 180 / Math.PI;
+        if (name === "acos") return Math.acos(value) * 180 / Math.PI;
+        if (name === "atan") return Math.atan(value) * 180 / Math.PI;
+        if (name === "ln") return Math.log(value);
+        if (name === "log") return Math.log10(value);
+        if (name === "e ^") return Math.exp(value);
+        if (name === "10 ^") return Math.pow(10, value);
         return null;
+      }
+      if (op === "operator_join") {
+        if (!("STRING1" in inputs) || !("STRING2" in inputs)) return null;
+        const left = this._literalString(inputs.STRING1);
+        const right = this._literalString(inputs.STRING2);
+        return left === null || right === null ? null : left + right;
+      }
+      if (op === "operator_length") {
+        if (!("STRING" in inputs)) return null;
+        const value = this._literalString(inputs.STRING);
+        return value === null ? null : value.length;
+      }
+      if (op === "operator_letter_of") {
+        if (!("LETTER" in inputs) || !("STRING" in inputs)) return null;
+        const index = this._literalNumber(inputs.LETTER);
+        const value = this._literalString(inputs.STRING);
+        if (index === null || value === null || index < 1 || index > value.length) return null;
+        return value.charAt(index - 1);
       }
       return null;
     }
 
     _foldNumeric(blocks) {
-      const st = this.stats;
-      const foldable = new Set(["operator_add", "operator_subtract", "operator_multiply",
-        "operator_divide", "operator_mod", "operator_round", "operator_mathop"]);
-      const refs = new Map();
-      for (const blk of Object.values(blocks)) {
-        if (!isDict(blk)) continue;
-        for (const value of Object.values(blk.inputs || {})) {
-          if (!isArr(value)) continue;
-          for (let i = 1; i < value.length; i++) {
-            if (isStr(value[i])) refs.set(value[i], (refs.get(value[i]) || 0) + 1);
-          }
-        }
-      }
-      for (let pass = 0; pass < 100000; pass++) {
-        let changed = false;
-        for (const [pid, parent] of Object.entries(blocks)) {
-          if (!isDict(parent) || !isDict(parent.inputs)) continue;
-          for (const [key, entry] of Object.entries(parent.inputs)) {
-            if (!isArr(entry) || entry.length < 2 || !isStr(entry[1]) ||
-                key.startsWith("SUBSTACK")) continue;
-            const cid = entry[1];
-            const child = blocks[cid];
-            if (!isDict(child)) continue;
-            if (!foldable.has(child.opcode)) continue;
-            if (child.topLevel === true) continue;
-            if (child.parent !== pid && child.parent !== null && child.parent !== undefined) continue;
-            if ((refs.get(cid) || 0) !== 1) continue;
-            const value = this._evalFoldable(child);
-            if (value === null || Number.isNaN(value)) continue;
-            const text = jsNumberStr(value);
-            if (text === null || text.length > 64) continue;
-            parent.inputs[key] = [1, [4, text]];
-            for (const x of this._collectSubgraph(blocks, cid, false)) {
-              delete blocks[x];
-              refs.delete(x);
-            }
-            st.const_values_folded += 1;
-            changed = true;
-            break;
-          }
-          if (changed) break;
-        }
-        if (!changed) break;
-      }
-    }
+ const st = this.stats;
+ const foldable = new Set([
+ "operator_add", "operator_subtract", "operator_multiply", "operator_divide",
+ "operator_mod", "operator_round", "operator_mathop", "operator_join",
+ "operator_length", "operator_letter_of"
+ ]);
 
-    // Goboscript lowers compile-time boolean expressions (for example
+ const refs = new Map();
+ for (const blk of Object.values(blocks)) {
+ if (!isDict(blk)) continue;
+ for (const value of Object.values(blk.inputs || {})) {
+ if (!isArr(value)) continue;
+ for (let i = 1; i < value.length; i++) {
+ if (isStr(value[i])) refs.set(value[i], (refs.get(value[i]) || 0) + 1);
+ }
+ }
+ }
+ for (let pass = 0; pass < 100000; pass++) {
+ let changed = false;
+ for (const [pid, parent] of Object.entries(blocks)) {
+ if (!isDict(parent) || !isDict(parent.inputs)) continue;
+ for (const [key, entry] of Object.entries(parent.inputs)) {
+ if (!isArr(entry) || entry.length < 2 || !isStr(entry[1]) ||
+ key.startsWith("SUBSTACK")) continue;
+ const cid = entry[1];
+ const child = blocks[cid];
+ if (!isDict(child) || !foldable.has(child.opcode)) continue;
+ if (child.topLevel === true) continue;
+ if (child.parent !== pid && child.parent !== null && child.parent !== undefined) continue;
+ if ((refs.get(cid) || 0) !== 1) continue;
+
+ const value = this._evalFoldable(child);
+ if (value === null || (typeof value === "number" && Number.isNaN(value))) continue;
+
+ let primitive;
+ if (typeof value === "string") {
+ if (value.length > 64) continue;
+ primitive = [10, value];
+ } else {
+ const text = jsNumberStr(value);
+ if (text === null || text.length > 64) continue;
+ primitive = [4, text];
+ }
+ parent.inputs[key] = [1, primitive];
+ for (const x of this._collectSubgraph(blocks, cid, false)) {
+ delete blocks[x];
+ refs.delete(x);
+ }
+ st.const_values_folded += 1;
+ changed = true;
+ break;
+ }
+ if (changed) break;
+ }
+ if (!changed) break;
+ }
+ }
+
+ // Goboscript lowers compile-time boolean expressions (for example
     // `"scratch" not in "goboscript"`) to ordinary Scratch reporter trees.
     // Numeric folding alone leaves `if (1 == 1)` and its dead branch in the
     // project. Evaluate only side-effect-free boolean operators over literal
     // numeric operands, then splice the selected branch into the surrounding
     // stack. Unknown/dynamic reporters are deliberately left untouched.
-    _constantBooleanInput(blocks, entry, seen) {
+ _constantBooleanInput(blocks, entry, seen) {
       if (!isArr(entry)) return null;
       for (let i = 1; i < entry.length; i++) {
         const id = entry[i];
@@ -2477,6 +2628,12 @@
         case "operator_lt": {
           const a = number("OPERAND1"), b = number("OPERAND2");
           return a === null || b === null ? null : a < b;
+        }
+        case "operator_contains": {
+          const first = this._literalString(inputs.STRING1);
+          const second = this._literalString(inputs.STRING2);
+          return first === null || second === null
+          ? null : first.toLowerCase().includes(second.toLowerCase());
         }
         case "operator_not": {
           const value = boolean("OPERAND");
@@ -3695,6 +3852,35 @@
         h2.toString(16).padStart(8, "0") + ":" + s.length.toString(36);
     }
 
+    _isPureCanonicalReporter(blocks, bid, seen = new Set()) {
+      if (!isStr(bid) || !has(blocks, bid) || seen.has(bid)) return false;
+      const blk = blocks[bid];
+      if (!isDict(blk)) return false;
+      if (blk.shadow === true) return true;
+      if (!REUSE_PURE_REPORTER_OPS.has(blk.opcode) || (isStr(blk.next) && blk.next)) return false;
+      const nextSeen = new Set(seen);
+      nextSeen.add(bid);
+      for (const entry of Object.values(blk.inputs || {})) {
+        if (!isArr(entry)) continue;
+        for (let i = 1; i < entry.length; i++) {
+          const item = entry[i];
+          if (isStr(item) && (!has(blocks, item) ||
+            !this._isPureCanonicalReporter(blocks, item, nextSeen))) return false;
+        }
+      }
+      return true;
+    }
+
+    _isPureCanonicalInput(blocks, entry) {
+      if (!isArr(entry)) return false;
+      for (let i = 1; i < entry.length; i++) {
+        const item = entry[i];
+        if (isStr(item) && (!has(blocks, item) ||
+            !this._isPureCanonicalReporter(blocks, item))) return false;
+      }
+      return true;
+    }
+
     _canonicalBlock(blocks, bid, cache, includeNext = false, stack = new Set()) {
       const key = bid + "|" + (includeNext ? 1 : 0);
       if (cache.has(key)) return cache.get(key);
@@ -3731,6 +3917,26 @@
         }
         inputs.push([k, items]);
       }
+      const commutative = new Set(["operator_add", "operator_multiply", "operator_equals",
+        "operator_and", "operator_or"]);
+      const operandKeys = (blk.opcode === "operator_add" || blk.opcode === "operator_multiply")
+        ? ["NUM1", "NUM2"] : ["OPERAND1", "OPERAND2"];
+      if (commutative.has(blk.opcode) && isDict(blk.inputs) &&
+          this._isPureCanonicalInput(blocks, blk.inputs[operandKeys[0]]) &&
+          this._isPureCanonicalInput(blocks, blk.inputs[operandKeys[1]])) {
+        const first = inputs.find((item) => item[0] === operandKeys[0]);
+        const second = inputs.find((item) => item[0] === operandKeys[1]);
+        if (first && second) {
+          const operands = [first[1], second[1]].sort((x, y) =>
+            JSON.stringify(x).localeCompare(JSON.stringify(y)));
+          for (let i = inputs.length - 1; i >= 0; i--) {
+            if (inputs[i][0] === operandKeys[0] || inputs[i][0] === operandKeys[1]) inputs.splice(i, 1);
+          }
+          inputs.push(["COMMUTATIVE_OPERANDS", operands]);
+          inputs.sort((x, y) => x[0].localeCompare(y[0]));
+        }
+      }
+
       const parts = ["B", blk.opcode === undefined ? null : blk.opcode, fields, inputs,
         this._freeze(blk.mutation || {}), !!blk.shadow];
       if (includeNext) {
@@ -5187,7 +5393,7 @@
           let m = pid ? this.bcMap.get(pid) : null;
           if (!m) m = this.bcByName.get(name);
           if (!m) return p;
-          if (p.length > 2) return [11, m[1], m[0], ...p.slice(3)];
+          if (isStr(pid)) return [11, m[1], m[0], ...p.slice(3)];
           return [11, m[1], ...p.slice(2)];
         }
         if (t === 12 || t === 13) {
