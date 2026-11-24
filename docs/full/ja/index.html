@@ -135,6 +135,7 @@
             <label class="opt" title="値を書き込むだけで読み取られない変数・リストを削除します。ID と名前の両方で調べますが、間接的なアクセスがある場合は注意してください。"><input type="checkbox" data-popt="removeWriteOnly"><span>書き込み専用の変数とリストを削除</span></label>
             <label class="opt" title="同じ変数に同一の固定値を連続して代入する場合、2回目以降を削除します。動的な値や間に別ブロックがある場合は変更しません。"><input type="checkbox" data-popt="removeDuplicateAssignments"><span>重複する固定値の代入を削除</span></label>
             <label class="opt" title="条件式が既知の純粋なReporterのみで構成され、共有参照がない空のifブロックを削除します。不明な条件式や共有Reporterは保持します。"><input type="checkbox" data-popt="removeEmptyIfs"><span>空のifブロックを削除（安全な条件式のみ）</span></label>
+            <label class="opt" title="0に初期化されたカウンターをループ先頭で1ずつ増やすrepeatのみを対象にします。ループ内の他の変数書き込みや不透明なカスタムブロック呼び出しがなく、別スクリプトからの参照・書き込みやモニターもない場合に、JSONサイズが小さくなるときだけ変換します。"><input type="checkbox" data-popt="counterLoopToForEach"><span>安全なカウンターループをfor eachに変換</span></label>
           </fieldset>
           <fieldset class="opt-group">
             <legend>構造をまとめる</legend>

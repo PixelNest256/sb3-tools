@@ -28,17 +28,17 @@ for (const app of ["docs/sb3/app.js", "docs/full/app.js"]) {
   const optimize = presets.find(p => p.id === "optimize").keys.slice().sort();
   const speed = presets.find(p => p.id === "speed").keys.slice().sort();
   const max = presets.find(p => p.id === "max").keys.slice().sort();
-  assert.deepEqual(speed, max.filter(key => !excluded.includes(key) && !["removeDuplicateAssignments", "removeEmptyIfs"].includes(key)).sort(), app + ": speed must be Maximum minus the four runtime-costly transforms");
+  assert.deepEqual(speed, max.filter(key => !excluded.includes(key) && !["removeDuplicateAssignments", "removeEmptyIfs", "counterLoopToForEach"].includes(key)).sort(), app + ": Speed excludes the runtime-costly and Max-only transforms");
   for (const key of excluded) {
     assert.ok(optimize.includes(key), app + ": Code optimization should retain " + key);
     assert.ok(!speed.includes(key), app + ": Runtime speed must disable " + key);
     assert.ok(max.includes(key), app + ": Maximum should retain " + key);
   }
-  for (const key of ["removeDuplicateAssignments", "removeEmptyIfs"]) {
- assert.ok(max.includes(key), app + ": Maximum should enable " + key);
- assert.ok(!speed.includes(key), app + ": Runtime speed should not implicitly enable " + key);
- }
- for (const key of ["inlineSingleCall", "removeNoops", "simplifyIfElse"]) {
+  for (const key of ["removeDuplicateAssignments", "removeEmptyIfs", "counterLoopToForEach"]) {
+    assert.ok(max.includes(key), app + ": Maximum should enable " + key);
+    assert.ok(!speed.includes(key), app + ": Runtime speed should not implicitly enable " + key);
+  }
+  for (const key of ["inlineSingleCall", "removeNoops", "simplifyIfElse"]) {
     assert.ok(speed.includes(key), app + ": Runtime speed should retain " + key);
   }
 }
@@ -57,4 +57,4 @@ for (const [relativePath, label] of pages) {
   assert.ok(html.slice(speed, max).includes(">" + label + "</button>"), relativePath + ": localized label missing");
 }
 
-console.log("Preset invariants passed: both engines, four localized pages, Maximum includes both redundant-block passes; speed remains Maximum-minus-four.");
+console.log("Preset invariants passed: both engines and four localized pages; Max enables the redundant-block passes while Speed excludes the Max-only additions.");

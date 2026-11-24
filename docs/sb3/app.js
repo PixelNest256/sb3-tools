@@ -27,6 +27,7 @@
         vars_removed: "unused variables removed",
         duplicate_assignments_removed: "duplicate literal assignments removed",
         empty_ifs_removed: "empty if blocks removed",
+        counter_repeats_converted: "counter loops converted to for-each",
         lists_removed: "unused lists removed",
         procs_renamed: "custom blocks shortened",
         args_renamed: "arguments renamed",
@@ -135,6 +136,7 @@
         vars_removed: "未使用の変数を削除",
         duplicate_assignments_removed: "重複する固定値の代入を削除",
         empty_ifs_removed: "空のifブロックを削除",
+        counter_repeats_converted: "カウンター付きrepeatをfor eachに変換",
         lists_removed: "未使用のリストを削除",
         procs_renamed: "カスタムブロック名を短縮",
         args_renamed: "引数名を短縮",
@@ -262,6 +264,7 @@
     removeWriteOnly: false,
     removeDuplicateAssignments: false,
     removeEmptyIfs: false,
+    counterLoopToForEach: false,
     normalizeTypes: false,
     stripNullFieldIds: false,
     zeroTopLevelCoords: false
@@ -304,7 +307,7 @@
       keys: keys.filter(function (key) { return speedSensitive.indexOf(key) === -1; }).concat(maxStage)
     });
     keys = keys.concat(maxStage);
-    out.push({ id: "max", keys: keys.concat(["removeDuplicateAssignments", "removeEmptyIfs"]) });
+    out.push({ id: "max", keys: keys.concat(["removeDuplicateAssignments", "removeEmptyIfs", "counterLoopToForEach"]) });
     return out;
   })();
 
@@ -342,7 +345,7 @@
     "dead_costumes_removed", "dead_sounds_removed", "dead_sprites_removed",
     "dead_assets_skipped",
     "writeonly_vars_removed", "writeonly_lists_removed",
-    "duplicate_assignments_removed", "empty_ifs_removed",
+    "duplicate_assignments_removed", "empty_ifs_removed", "counter_repeats_converted",
     "md5ext_removed", "numeric_strings_normalized", "meta_agent_cleared"
   ];
 

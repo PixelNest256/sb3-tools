@@ -13,6 +13,137 @@ for (const [name, engine] of engines) {
   assert.equal(comp.options.removeDuplicateAssignments, false, name + ": duplicate pass opt-in");
   assert.equal(comp.options.removeEmptyIfs, false, name + ": empty-if pass opt-in");
 
+  assert.equal(comp.options.counterLoopToForEach, false, name + ": counter-loop pass opt-in");
+
+  const counterBlocks = {
+    start: b("event_whenflagclicked", null, "initCounter", {}, {}, { topLevel: true }),
+    initCounter: b("data_setvariableto", "start", "counterRepeatBlockLong", {
+      VALUE: [1, [4, "0"]]
+    }, { VARIABLE: ["index", "counterStoreLong"] }),
+    counterRepeatBlockLong: b("control_repeat", "initCounter", "afterCounterLoop", {
+      TIMES: [1, [4, "4"]],
+      SUBSTACK: [2, "counterIncrementBlockLong"]
+    }),
+    counterIncrementBlockLong: b("data_changevariableby", "counterRepeatBlockLong",
+      "counterBodyRead", { VALUE: [1, [4, "1"]] },
+      { VARIABLE: ["index", "counterStoreLong"] }),
+    counterBodyRead: b("looks_say", "counterIncrementBlockLong", null, {
+      MESSAGE: [2, "counterReadReporter"]
+    }),
+    counterReadReporter: b("data_variable", "counterBodyRead", null, {},
+      { VARIABLE: ["index", "counterStoreLong"] }),
+    afterCounterLoop: b("looks_say", "counterRepeatBlockLong", null, {
+      MESSAGE: [1, [10, "finished"]]
+    })
+  };
+  const counterTarget = { blocks: counterBlocks };
+  const counterProjectForSize = {
+    targets: [counterTarget], monitors: [], extensions: [], meta: { semver: "3.0.0" }
+  };
+  const counterBeforeSize = Buffer.byteLength(JSON.stringify(counterProjectForSize));
+  const counterComp = new engine.Compressor({ counterLoopToForEach: true });
+  counterComp._convertCounterRepeats(counterBlocks, {}, counterProjectForSize.targets);
+  const counterAfterSize = Buffer.byteLength(JSON.stringify(counterProjectForSize));
+  assert.equal(counterComp.stats.counter_repeats_converted, 1, name + ": convert safe counter repeat");
+  assert.ok(counterAfterSize < counterBeforeSize, name + ": converted blocks JSON is strictly smaller");
+  assert.equal(counterBlocks.counterRepeatBlockLong.opcode, "control_for_each");
+  assert.deepEqual(counterBlocks.counterRepeatBlockLong.fields.VARIABLE,
+    ["index", "counterStoreLong"], name + ": transfer counter field");
+  assert.deepEqual(counterBlocks.counterRepeatBlockLong.inputs.VALUE, [1, [4, "4"]],
+    name + ": transfer repeat count");
+  assert.equal("TIMES" in counterBlocks.counterRepeatBlockLong.inputs, false);
+  assert.equal(counterBlocks.counterRepeatBlockLong.inputs.SUBSTACK[1], "counterBodyRead",
+    name + ": remove increment from loop body");
+  assert.equal(counterBlocks.counterBodyRead.parent, "counterRepeatBlockLong",
+    name + ": repair body parent");
+  assert.equal(counterBlocks.afterCounterLoop.parent, "counterRepeatBlockLong",
+    name + ": preserve loop continuation");
+  assert.equal(counterBlocks.initCounter.next, "counterRepeatBlockLong",
+    name + ": preserve zero initializer");
+
+  const unsafeCounter = (patch = {}) => ({
+    start: b("event_whenflagclicked", null, "init", {}, {}, { topLevel: true }),
+    init: b("data_setvariableto", "start", "repeat", { VALUE: [1, [4, "0"]] },
+      { VARIABLE: ["i", "counter"] }),
+    repeat: b("control_repeat", "init", "after", {
+      TIMES: [1, [4, "3"]], SUBSTACK: [2, "increment"]
+    }),
+    increment: b("data_changevariableby", "repeat", "body",
+      { VALUE: [1, [4, "1"]] }, { VARIABLE: ["i", "counter"] }),
+    body: b("looks_say", "increment", null, { MESSAGE: [1, [10, "body"]] }),
+    after: b("looks_say", "repeat", null, { MESSAGE: [1, [10, "after"]] }),
+    ...patch
+  });
+  const noInitializer = unsafeCounter({
+    init: b("looks_say", "start", "repeat", { MESSAGE: [1, [10, "not zero"]] })
+  });
+  new engine.Compressor({})._convertCounterRepeats(noInitializer, {}, [{ blocks: noInitializer }]);
+  assert.equal(noInitializer.repeat.opcode, "control_repeat", name + ": require zero initializer");
+
+  const extraWrite = unsafeCounter({
+    increment: b("data_changevariableby", "repeat", "writeOther",
+      { VALUE: [1, [4, "1"]] }, { VARIABLE: ["i", "counter"] }),
+    writeOther: b("data_setvariableto", "increment", "body",
+      { VALUE: [1, [4, "9"]] }, { VARIABLE: ["other", "otherStore"] }),
+    body: b("looks_say", "writeOther", null, { MESSAGE: [1, [10, "body"]] })
+  });
+  new engine.Compressor({})._convertCounterRepeats(extraWrite, {}, [{ blocks: extraWrite }]);
+  assert.equal(extraWrite.repeat.opcode, "control_repeat", name + ": preserve other variable writes");
+
+  const opaqueCall = unsafeCounter({
+    increment: b("data_changevariableby", "repeat", "call",
+      { VALUE: [1, [4, "1"]] }, { VARIABLE: ["i", "counter"] }),
+    call: b("procedures_call", "increment", "body", {}, {},
+      { mutation: { proccode: "unknown %s", argumentids: "[]", warp: "false" } })
+  });
+  new engine.Compressor({})._convertCounterRepeats(opaqueCall, {}, [{ blocks: opaqueCall }]);
+  assert.equal(opaqueCall.repeat.opcode, "control_repeat", name + ": preserve opaque procedure calls");
+
+  const externalWrite = unsafeCounter({
+    otherRoot: b("event_whenflagclicked", null, "otherWrite", {}, {}, { topLevel: true }),
+    otherWrite: b("data_setvariableto", "otherRoot", null, { VALUE: [1, [4, "8"]] },
+      { VARIABLE: ["i", "counter"] })
+  });
+  new engine.Compressor({})._convertCounterRepeats(externalWrite, {}, [{ blocks: externalWrite }]);
+  assert.equal(externalWrite.repeat.opcode, "control_repeat", name + ": preserve variables written by concurrent scripts");
+
+  const externalRead = unsafeCounter({
+    otherRoot: b("event_whenflagclicked", null, "otherRead", {}, {}, { topLevel: true }),
+    otherRead: b("looks_say", "otherRoot", null, { MESSAGE: [2, "otherReporter"] }),
+    otherReporter: b("data_variable", "otherRead", null, {},
+      { VARIABLE: ["i", "counter"] })
+  });
+  new engine.Compressor({})._convertCounterRepeats(externalRead, {},
+    [{ blocks: externalRead }]);
+  assert.equal(externalRead.repeat.opcode, "control_repeat", name + ": preserve concurrent readers");
+
+  const monitoredCounter = unsafeCounter();
+  new engine.Compressor({})._convertCounterRepeats(monitoredCounter, {},
+    [{ blocks: monitoredCounter }], [{ id: "counter" }]);
+  assert.equal(monitoredCounter.repeat.opcode, "control_repeat", name + ": preserve monitored counters");
+
+  const sameScriptWriteAfter = unsafeCounter({
+    after: b("data_setvariableto", "repeat", null, { VALUE: [1, [4, "8"]] },
+      { VARIABLE: ["i", "counter"] })
+  });
+  new engine.Compressor({})._convertCounterRepeats(sameScriptWriteAfter, {},
+    [{ blocks: sameScriptWriteAfter }]);
+  assert.equal(sameScriptWriteAfter.repeat.opcode, "control_for_each",
+    name + ": allow later sequential writes in the same script");
+
+  const commentedIncrement = unsafeCounter();
+  new engine.Compressor({})._convertCounterRepeats(commentedIncrement,
+    { note: { blockId: "increment", text: "counter note" } }, [{ blocks: commentedIncrement }]);
+  assert.equal(commentedIncrement.repeat.opcode, "control_repeat", name + ": preserve commented increment");
+
+  const nonIntegerCount = unsafeCounter({
+    repeat: b("control_repeat", "init", "after", {
+      TIMES: [1, [4, "2.5"]], SUBSTACK: [2, "increment"]
+    })
+  });
+  new engine.Compressor({})._convertCounterRepeats(nonIntegerCount, {}, [{ blocks: nonIntegerCount }]);
+  assert.equal(nonIntegerCount.repeat.opcode, "control_repeat", name + ": preserve non-integer repeat count");
+
   const assignments = {
     hat: b("event_whenflagclicked", null, "a1", {}, {}, { topLevel: true }),
     a1: b("data_setvariableto", "hat", "a2", { VALUE: [1, [4, "7"]] }, { VARIABLE: ["score", "var1"] }),
@@ -160,6 +291,29 @@ for (const [name, engine] of engines) {
   assert.equal(topLevelIf.after.topLevel, true);
   assert.equal(topLevelIf.after.x, 12);
   assert.equal(topLevelIf.after.y, 34);
+
+  const pipelineCounterBlocks = unsafeCounter();
+  const pipelineCounterProject = {
+    targets: [{
+      isStage: false, name: "Sprite1", variables: { counter: ["i", 0] },
+      lists: {}, broadcasts: {}, blocks: pipelineCounterBlocks, comments: {},
+      currentCostume: 0, costumes: [], sounds: [], volume: 100, layerOrder: 0,
+      visible: true, x: 0, y: 0, size: 100, direction: 90,
+      draggable: false, rotationStyle: "all around"
+    }],
+    monitors: [], extensions: [], meta: { semver: "3.0.0" }
+  };
+  const pipelineOptions = Object.fromEntries(
+    Object.keys(new engine.Options({})).map((key) => [key, false])
+  );
+  pipelineOptions.counterLoopToForEach = true;
+  const pipelineCounterResult = engine.compressProject(
+    pipelineCounterProject, new engine.Options(pipelineOptions), () => {}
+  );
+  assert.equal(pipelineCounterResult.stats.counter_repeats_converted, 1,
+    name + ": compressProject invokes counter-loop conversion");
+  assert.equal(pipelineCounterResult.project.targets[0].blocks.repeat.opcode,
+    "control_for_each", name + ": pipeline emits for-each");
 
   const integrationBlocks = {
     hat: b("event_whenflagclicked", null, "a1", {}, {}, { topLevel: true }),

@@ -343,6 +343,7 @@
     removeWriteOnly: false,
     removeDuplicateAssignments: false,
     removeEmptyIfs: false,
+    counterLoopToForEach: false,
     normalizeTypes: false,
     stripNullFieldIds: false,
     zeroTopLevelCoords: false
@@ -389,6 +390,7 @@
         dead_assets_skipped: 0,
         writeonly_vars_removed: 0, writeonly_lists_removed: 0,
         duplicate_assignments_removed: 0, empty_ifs_removed: 0,
+        counter_repeats_converted: 0,
         md5ext_removed: 0, numeric_strings_normalized: 0, meta_agent_cleared: 0
       };
       this.varMap = new Map();
@@ -464,11 +466,12 @@
         this.progress("collect", 1.0, "Simplifying scripts...");
         this._simplifyProject(project);
       }
-      if (o.removeDuplicateAssignments || o.removeEmptyIfs) {
+      if (o.removeDuplicateAssignments || o.removeEmptyIfs || o.counterLoopToForEach) {
         for (const tgt of targets) {
           if (!isDict(tgt) || !isDict(tgt.blocks)) continue;
           if (o.removeDuplicateAssignments) this._removeDuplicateAssignments(tgt.blocks, tgt.comments);
           if (o.removeEmptyIfs) this._removeEmptyIfs(tgt.blocks, tgt.comments);
+          if (o.counterLoopToForEach) this._convertCounterRepeats(tgt.blocks, tgt.comments, targets, project.monitors);
         }
       }
       if (o.removeDeadAssets) {
@@ -2148,6 +2151,141 @@
         const pvalue = this._literalAssignmentValue((parent.inputs || {}).VALUE);
         if (!pvalue || pvalue[0] !== value[0] || pvalue[1] !== value[1]) continue;
         if (this._spliceOut(blocks, id)) st.duplicate_assignments_removed += 1;
+      }
+    }
+
+    _literalIntegerInput(entry) {
+      if (!isArr(entry)) return null;
+      const items = entry.slice(1);
+      const primitives = items.filter((v) => isArr(v));
+      if (primitives.length !== 1 ||
+          !items.every((v) => v === primitives[0] || v === null || v === undefined)) return null;
+      const primitive = primitives[0];
+      if (!isArr(primitive) || primitive[0] !== 4 || primitive.length < 2) return null;
+      const value = Number(primitive[1]);
+      return Number.isSafeInteger(value) && value >= 0 ? value : null;
+    }
+
+    _convertCounterRepeats(blocks, comments, allTargets, monitors) {
+      const st = this.stats;
+      for (const [loopId, originalLoop] of Object.entries(blocks)) {
+        if (!isDict(originalLoop) || originalLoop.opcode !== "control_repeat" ||
+            !isDict(originalLoop.inputs) || !isDict(originalLoop.fields)) continue;
+        // repeat rounds its count; for-each uses Number(VALUE), so require an integer literal.
+        const count = this._literalIntegerInput(originalLoop.inputs.TIMES);
+        if (count === null) continue;
+        const substack = originalLoop.inputs.SUBSTACK;
+        if (!isArr(substack) || substack.length !== 2 || !isStr(substack[1])) continue;
+        const incrementId = substack[1];
+        const increment = blocks[incrementId];
+        if (!isDict(increment) || increment.opcode !== "data_changevariableby" ||
+            increment.parent !== loopId || !isDict(increment.fields) ||
+            !isDict(increment.inputs)) continue;
+        const variable = increment.fields.VARIABLE;
+        if (!isArr(variable) || !isStr(variable[1]) || !variable[1]) continue;
+        const delta = this._literalIntegerInput(increment.inputs.VALUE);
+        if (delta !== 1) continue;
+        // A zero initializer plus a first-block +1 increment yields the for-each sequence 1..N.
+        const initializer = isStr(originalLoop.parent) ? blocks[originalLoop.parent] : null;
+        if (!isDict(initializer) || initializer.opcode !== "data_setvariableto" ||
+            initializer.next !== loopId || !isDict(initializer.fields) ||
+            !isArr(initializer.fields.VARIABLE) ||
+            initializer.fields.VARIABLE[1] !== variable[1] ||
+            initializer.fields.VARIABLE[0] !== variable[0] ||
+            this._literalIntegerInput(initializer.inputs && initializer.inputs.VALUE) !== 0) continue;
+        if (isDict(comments) && Object.values(comments).some((c) =>
+            isDict(c) && (c.blockId === incrementId))) continue;
+        const seen = new Set();
+        const pending = [incrementId];
+        let writeCount = 0;
+        let unsafeCall = false;
+        while (pending.length) {
+          const id = pending.pop();
+          if (!isStr(id) || seen.has(id) || !has(blocks, id)) continue;
+          seen.add(id);
+          const block = blocks[id];
+          if (!isDict(block)) continue;
+          if (block.opcode === "procedures_call") unsafeCall = true;
+          if (block.opcode === "data_setvariableto" ||
+              block.opcode === "data_changevariableby" ||
+              block.opcode === "control_for_each") writeCount += 1;
+          if (isStr(block.next)) pending.push(block.next);
+          if (isDict(block.inputs)) {
+            for (const entry of Object.values(block.inputs)) {
+              if (!isArr(entry)) continue;
+              for (let i = 1; i < entry.length; i++) {
+                if (isStr(entry[i])) pending.push(entry[i]);
+              }
+            }
+          }
+        }
+        if (unsafeCall || writeCount !== 1 || !seen.has(incrementId)) continue;
+        if (isDict(comments) && Object.values(comments).some((c) =>
+            isDict(c) && seen.has(c.blockId))) continue;
+        // for-each assigns the counter before entering its body; reject concurrent observers.
+        const rootOf = (store, blockId) => {
+          const visited = new Set();
+          let current = blockId;
+          while (isStr(current) && !visited.has(current) && has(store, current)) {
+            visited.add(current);
+            const parent = store[current] && store[current].parent;
+            if (!isStr(parent) || !has(store, parent)) break;
+            current = parent;
+          }
+          return current;
+        };
+        const loopRoot = rootOf(blocks, originalLoop.parent);
+        let externalAccess = isArr(monitors) && monitors.some((monitor) =>
+          isDict(monitor) && monitor.id === variable[1]);
+        for (const target of (isArr(allTargets) ? allTargets : [])) {
+          const otherBlocks = isDict(target) && isDict(target.blocks) ? target.blocks : {};
+          for (const [otherId, otherBlock] of Object.entries(otherBlocks)) {
+            if (!isDict(otherBlock)) continue;
+            const sameTarget = otherBlocks === blocks;
+            if (sameTarget && (seen.has(otherId) || otherId === loopId)) continue;
+            const otherRoot = rootOf(otherBlocks, otherId);
+            const fields = isDict(otherBlock.fields) ? otherBlock.fields : {};
+            const field = fields.VARIABLE;
+            const readsCounter = otherBlock.opcode === "data_variable";
+            const writesCounter = ["data_setvariableto", "data_changevariableby", "control_for_each"]
+              .includes(otherBlock.opcode);
+            if ((readsCounter || writesCounter) && isArr(field) &&
+                field[1] === variable[1] && otherRoot !== loopRoot) externalAccess = true;
+            if (isDict(otherBlock.inputs)) {
+              for (const entry of Object.values(otherBlock.inputs)) {
+                if (!isArr(entry)) continue;
+                for (let i = 1; i < entry.length; i++) {
+                  if (isStr(entry[i]) && seen.has(entry[i])) {
+                    externalAccess = true;
+                  }
+                }
+              }
+            }
+          }
+        }
+        const stageTarget = (isArr(allTargets) ? allTargets : []).find((target) =>
+          isDict(target) && target.isStage && isDict(target.variables) &&
+          has(target.variables, variable[1]));
+        if (stageTarget && (isArr(allTargets) ? allTargets : []).some((target) =>
+          isDict(target) && isDict(target.blocks) &&
+          Object.values(target.blocks).some((block) =>
+            isDict(block) && typeof block.opcode === "string" &&
+            block.opcode.indexOf("control_create_clone") === 0))) externalAccess = true;
+        if (externalAccess) continue;
+        const before = JSON.stringify(blocks);
+        const trial = JSON.parse(before);
+        if (!this._spliceOut(trial, incrementId)) continue;
+        const loop = trial[loopId];
+        if (!isDict(loop) || !isDict(loop.inputs)) continue;
+        loop.opcode = "control_for_each";
+        loop.inputs.VALUE = loop.inputs.TIMES;
+        delete loop.inputs.TIMES;
+        loop.fields = loop.fields || {};
+        loop.fields.VARIABLE = [variable[0], variable[1]];
+        if (JSON.stringify(trial).length >= before.length) continue;
+        for (const key of Object.keys(blocks)) delete blocks[key];
+        Object.assign(blocks, trial);
+        st.counter_repeats_converted += 1;
       }
     }
 
