@@ -157,7 +157,7 @@
           <fieldset class="opt-group">
             <legend>Rename &amp; fold</legend>
             <label class="opt" title="Replaces long internal block, variable, and list identifiers with shorter IDs. Visible names are not changed."><input type="checkbox" checked data-opt="shortenIds"><span>Shorten internal IDs</span></label>
-            <label class="opt" title="Shortens variable and list display names to reduce stored text. Requires internal ID shortening and changes visible names."><input type="checkbox" checked data-opt="renameStores"><span>Shorten variable and list names</span></label>
+            <label class="opt" title="Shortens variable and list display names to reduce stored text. Requires internal ID shortening. ID-based references, static sensing_of targets, and monitor parameters are updated; names that may be read through a dynamic sensing_of target are preserved."><input type="checkbox" checked data-opt="renameStores"><span>Shorten variable and list names</span></label>
             <label class="opt" title="Assigns shorter internal IDs to frequently occurring block types, reducing repeated ID text in project.json."><input type="checkbox" checked data-opt="freqIds"><span>Give frequent blocks shorter IDs</span></label>
             <label class="opt" title="Shortens custom procedure names in their prototype and call metadata; displayed custom block names may change."><input type="checkbox" checked data-opt="compressProcs"><span>Shorten custom block names</span></label>
             <label class="opt" title="Evaluates expressions whose inputs are all constants and replaces each expression with its result."><input type="checkbox" checked data-opt="foldConstants"><span>Calculate constant math</span></label>

@@ -331,9 +331,8 @@ check(out.stats.dead_hide_blocks_removed === 2, "hide blocks for removed stores 
 check(!Object.keys(t0.blocks).some((b) => ["data_hidevariable", "data_hidelist"].includes(t0.blocks[b].opcode)),
   "a hide block for a removed store is still present");
 
-// Keeping monitors (the default): a displayed variable keeps its name and a
-// hidden monitor keeps its saved position, so neither the store nor the monitor
-// may be renamed or dropped.
+// Keeping monitors retains store IDs and monitor positions.
+// With renameStores enabled, monitor params follow shortened store names.
 const monProject = buildProject();
 monProject.monitors = [
   { id: VID_COUNT, opcode: "data_variable", params: { VARIABLE: "count" }, spriteName: "Sprite1",
@@ -347,18 +346,20 @@ const keptMons = kept.project.monitors || [];
 check(kept.stats.monitors_removed === 0, "keeping monitors removed one");
 check(keptMons.length === 2, `keeping monitors dropped one (${keptMons.length} left)`);
 if (keptMons.length === 2) {
-  check(keptMons[0].id === VID_COUNT && keptMons[0].params.VARIABLE === "count",
-    "keeping monitors renamed the displayed variable");
-  check(keptMons[0].x === 12 && keptMons[0].y === 34, "keeping monitors dropped the displayed monitor position");
-  check(keptMons[1].id === LID_DEAD && keptMons[1].params.LIST === "deadList",
-    "keeping monitors renamed the hidden monitor's list");
-  check(keptMons[1].x === 56 && keptMons[1].y === 78, "keeping monitors dropped the hidden monitor position");
+ const varName = keptTarget.variables[VID_COUNT][0];
+ const listName = keptTarget.lists[LID_DEAD][0];
+ check(keptMons[0].id === VID_COUNT && keptMons[0].params.VARIABLE === varName && varName !== "count",
+ "monitor variable name did not follow the renamed store");
+ check(keptMons[0].x === 12 && keptMons[0].y === 34, "keeping monitors dropped the displayed monitor position");
+ check(keptMons[1].id === LID_DEAD && keptMons[1].params.LIST === listName && listName !== "deadList",
+ "monitor list name did not follow the renamed store");
+ check(keptMons[1].x === 56 && keptMons[1].y === 78, "keeping monitors dropped the hidden monitor position");
 }
-check(keptTarget.variables && keptTarget.variables[VID_COUNT] && keptTarget.variables[VID_COUNT][0] === "count",
-  "keeping monitors renamed the displayed variable's store");
-check(keptTarget.lists && keptTarget.lists[LID_DEAD] && keptTarget.lists[LID_DEAD][0] === "deadList",
-  "keeping monitors removed or renamed the hidden monitor's list");
-// Renaming is off for kept stores, but every other store is still shortened.
+check(keptTarget.variables && keptTarget.variables[VID_COUNT] && keptTarget.variables[VID_COUNT][0] !== "count",
+ "monitor variable store name was not shortened");
+check(keptTarget.lists && keptTarget.lists[LID_DEAD] && keptTarget.lists[LID_DEAD][0] !== "deadList",
+ "monitor list store name was not shortened");
+// Monitor store IDs remain stable while their display names are shortened.
 check(Object.keys(keptTarget.variables || {}).length === 2, "keeping monitors preserved a variable it should not have");
 
 /*
@@ -1220,11 +1221,13 @@ const keptScopeOut = SB3.compressProject(keptScopeProject,
 audit(keptScopeOut.project);
 const keptScope = checkScopeProject(keptScopeOut.project, "kept monitor");
 const keptS2 = keptScope.sprites.find((t) => t.name === "Sprite2");
-check(keptS2.variables.spriteTwoLocal000001 &&
-  keptS2.variables.spriteTwoLocal000001[0] === "A",
-  "a kept monitor store was renamed");
-check(!namesOfStores(keptScope.stage.variables).includes("A"),
-  "the stage reused a sprite's kept local variable name");
+const keptScopeMonitor = keptScopeOut.project.monitors[0];
+const keptScopeName = keptS2.variables.spriteTwoLocal000001 && keptS2.variables.spriteTwoLocal000001[0];
+check(keptS2.variables.spriteTwoLocal000001 && keptScopeName !== "A" &&
+ keptScopeMonitor.params.VARIABLE === keptScopeName,
+ "monitor store name and monitor params were not shortened consistently");
+check(namesOfStores(keptScope.stage.variables).includes("A"),
+ "stage did not receive the shortest name before sprite-local monitor stores");
 
 /*
  * 6. TurboWarp's "store settings in project" comment.  runtime.js looks on the
@@ -1684,15 +1687,27 @@ check(!!(sensedSprite.variables || {}).V1, "a variable read by sensing_of was re
 check(opcodesOf(sensedSprite).includes("data_setvariableto"),
   "the writer of a variable read by sensing_of was removed");
 
+const sensedRenameRun = SB3.compressProject(JSON.parse(JSON.stringify(sensedRun.project)),
+ new SB3.Options({ shortenIds: true, renameStores: true, removeUnused: false }), () => {});
+audit(sensedRenameRun.project);
+const sensedRenameTarget = findTarget(sensedRenameRun.project, "Sprite1");
+const sensedRenameEntry = Object.entries(sensedRenameTarget.variables || {})[0];
+const sensedRenameReader = findTarget(sensedRenameRun.project, "Sprite2");
+const sensedRenameOf = Object.values(sensedRenameReader.blocks || {}).find((b) => b && b.opcode === "sensing_of");
+check(!!sensedRenameEntry && sensedRenameEntry[1][0] !== "v", "static sensing_of target variable name should shorten");
+check(!!sensedRenameOf && sensedRenameOf.fields.PROPERTY[0] === sensedRenameEntry[1][0],
+ "static sensing_of PROPERTY must follow the selected sprite variable name");
+
 // A dynamic OBJECT reporter may have a sensing_of_object_menu shadow with a
 // plausible-looking sprite name. That shadow is only a fallback, not the
 // selected object; ID shortening must not resolve PROPERTY against it.
 const dynamicSensingRun = SB3.compressProject(buildMiniProject([
   stageOf(),
   buildTarget("dots", false, {
-    variables: { DOTVAR: ["pte_cap", 0] }
+    variables: { DOTVAR: ["pte_cap", 0], OTHER: ["unrelatedLongName", 0] }
   }),
-  buildTarget("Sprite2", false, {
+  buildTarget("dots2", false, { variables: { DOTVAR2: ["pte_cap", 1] } }),
+ buildTarget("Sprite2", false, {
     blocks: {
       flag: blk("event_whenflagclicked", { topLevel: true, x: 40, y: 40, next: "of" }),
       of: blk("sensing_of", {
@@ -1708,13 +1723,21 @@ const dynamicSensingRun = SB3.compressProject(buildMiniProject([
       })
     }
   })
-]), new SB3.Options({ shortenIds: true, renameStores: true }), () => {});
+]), new SB3.Options({ shortenIds: true, renameStores: true, removeUnused: false }), () => {});
 audit(dynamicSensingRun.project);
 const dynamicSensingSprite = findTarget(dynamicSensingRun.project, "Sprite2");
 const dynamicSensingBlock = Object.values(dynamicSensingSprite.blocks).find(
   (b) => b && b.opcode === "sensing_of");
 check(!!dynamicSensingBlock && dynamicSensingBlock.fields.PROPERTY[0] === "pte_cap",
   "a dynamic sensing_of OBJECT reporter was incorrectly resolved through its shadow menu");
+const dynamicDots = findTarget(dynamicSensingRun.project, "dots");
+const dynamicDots2 = findTarget(dynamicSensingRun.project, "dots2");
+const dotsProperty = Object.entries(dynamicDots.variables || {}).find(([, v]) => v[0] === "pte_cap");
+const dots2Property = Object.entries(dynamicDots2.variables || {}).find(([, v]) => v[0] === "pte_cap");
+const unrelated = Object.entries(dynamicDots.variables || {}).find(([, v]) => v[0] !== "pte_cap");
+check(!!dotsProperty && dotsProperty[0] !== "DOTVAR", "dynamic sensing_of must preserve the name but shorten its ID");
+check(!!dots2Property && dots2Property[0] !== "DOTVAR2", "dynamic sensing_of must protect matching names on every sprite");
+check(!!unrelated && unrelated[1][0] !== "unrelatedLongName", "dynamic sensing_of protection must not disable unrelated name shortening");
 
 // A static menu naming a target that does not exist must remain untouched and
 // must not dereference a missing/null store mapping during ID shortening.

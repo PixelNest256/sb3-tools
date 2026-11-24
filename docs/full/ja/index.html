@@ -150,7 +150,7 @@
           <fieldset class="opt-group">
             <legend>名前と定数</legend>
             <label class="opt" title="ブロック・変数・リストなどの内部 ID を短縮します。画面に表示される名前は変わりません。"><input type="checkbox" checked data-popt="shortenIds"><span>内部 ID を短縮</span></label>
-            <label class="opt" title="変数名・リスト名の表示文字列を短縮します。内部 ID の短縮も有効な場合に働き、画面上の名前が変わります。"><input type="checkbox" checked data-popt="renameStores"><span>変数・リスト名も短縮</span></label>
+            <label class="opt" title="変数名・リスト名の表示文字列を短縮します。内部ID短縮が必要です。ID参照、静的な sensing_of の参照名、モニター参照は更新し、対象スプライトが動的に決まる sensing_of で使われる名前は参照を保つため変更しません。"><input type="checkbox" checked data-popt="renameStores"><span>変数・リスト名も短縮</span></label>
             <label class="opt" title="出現頻度の高いブロック種別に短い内部 ID を割り当て、project.json 内で繰り返される文字数を減らします。"><input type="checkbox" checked data-popt="freqIds"><span>頻出ブロックを短い ID に</span></label>
             <label class="opt" title="カスタムブロックの定義名・呼び出し情報に含まれる名前を短縮します。表示されるブロック名も変わる場合があります。"><input type="checkbox" checked data-popt="compressProcs"><span>カスタムブロック名を短縮</span></label>
             <label class="opt" title="入力がすべて定数の式を事前に計算し、式ブロックを計算結果に置き換えます。"><input type="checkbox" checked data-popt="foldConstants"><span>定数計算を畳み込む</span></label>

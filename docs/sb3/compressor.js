@@ -419,6 +419,7 @@
       this.showListIds = new Set();
       this.keptMonVarIds = new Set();
       this.keptMonListIds = new Set();
+      this.fixedVarNameIds = new Map();
       this.visibleVarIds = new Set();
       this.visibleListIds = new Set();
       this.standaloneVarIds = new Set();
@@ -664,23 +665,15 @@
     }
 
     // ------------------------------------------------------------------
-    // Stores a monitor points at, resolved by id first and then by name.
-    // Keeping monitors (the default) leaves those stores and the monitor
-    // entries alone so a displayed variable keeps its label and a hidden
-    // monitor keeps its saved position.  `removeMonitors` opts out: hidden
-    // monitors are dropped and their stores can be shortened or removed.
-    //
-    // That opt-out is only safe when names are also being rewritten
-    // (`renameStores`).  When names are kept, a hidden monitor's store may
-    // still be read by name from a script that was compiled against the
-    // original ids, so dropping it silently breaks the project.  In that
-    // case only *visible* monitors may be collected; their stores have to
-    // survive or the monitor would point at a missing variable.
+    // Stores a monitor points at, resolved by ID and target scope.
+    // Keeping monitors retains their store IDs and hidden monitor stores.
+    // With renameStores enabled, monitor params follow the shortened names.
+    // removeMonitors can drop hidden monitors when their stores are no longer needed.
     _collectMonitorStores(targets, monitors, visibleOnly = false) {
       const varIds = new Set(), listIds = new Set();
       this.keptMonVarIds = varIds;
       this.keptMonListIds = listIds;
-      if (!isArr(monitors) || !monitors.length) return;
+      this.fixedVarNameIds = new Map();
       const scopes = { v: new Map(), l: new Map() };
       let stageName = null;
       const note = (kind, tname, name, id) => {
@@ -711,7 +704,53 @@
         return out;
       };
       const idsV = allIds("v"), idsL = allIds("l");
-      for (const mon of monitors) {
+      // sensing_of resolves PROPERTY by the selected target variable name, not by ID.
+      // A reporter OBJECT can evaluate to any sprite or the Stage, so preserve
+      // matching local names on every possible target. Static menus are rewritten
+      // later to the selected target mapped name.
+      for (const refTgt of targets) {
+        if (!isDict(refTgt) || !isDict(refTgt.blocks)) continue;
+        for (const blk of Object.values(refTgt.blocks)) {
+          if (!isDict(blk) || blk.opcode !== "sensing_of") continue;
+          const property = (blk.fields || {}).PROPERTY;
+          if (!isArr(property) || !isStr(property[0])) continue;
+          let staticObject = null;
+          const objectField = (blk.fields || {}).OBJECT;
+          if (isArr(objectField) && isStr(objectField[0])) {
+            staticObject = objectField[0];
+          } else {
+            const input = (blk.inputs || {}).OBJECT;
+            if (isArr(input)) {
+              for (let i = 1; i < input.length; i++) {
+                const id = input[i];
+                if (!isStr(id) || !has(refTgt.blocks, id)) continue;
+                const menu = refTgt.blocks[id];
+                if (!isDict(menu)) continue;
+                if (menu.opcode === "sensing_of_object_menu") {
+                  const selected = (menu.fields || {}).OBJECT;
+                  if (isArr(selected) && isStr(selected[0])) staticObject = selected[0];
+                  break;
+                }
+                if (menu.shadow !== true) {
+                  staticObject = null;
+                  break;
+                }
+              }
+            }
+          }
+          if (staticObject !== null) continue;
+          for (const candidate of targets) {
+            if (!isDict(candidate) || !isDict(candidate.variables)) continue;
+            for (const [id, ent] of Object.entries(candidate.variables)) {
+              if (!isArr(ent) || ent[0] !== property[0]) continue;
+              if (!this.fixedVarNameIds.has(candidate)) this.fixedVarNameIds.set(candidate, new Set());
+              this.fixedVarNameIds.get(candidate).add(id);
+            }
+          }
+        }
+      }
+
+      for (const mon of (isArr(monitors) ? monitors : [])) {
         if (!isDict(mon)) continue;
         if (visibleOnly && mon.visible === false) continue;
         const isVar = mon.opcode === "data_variable";
@@ -808,21 +847,21 @@
           if (dropV && dropV.has(id)) continue;
           const name = isArr(ent) && ent.length ? ent[0] : String(ent);
           const kept = keepV.has(id);
-          info.vars.push({ id, name, kept });
-          if (kept) {
-            keptIds.add(id);
-            if (isStr(name)) keptVarNames.add(name);
-          }
+          const fixedNames = this.fixedVarNameIds.get(tgt);
+          const keepName = (!renameStores && kept) || !!(fixedNames && fixedNames.has(id));
+          info.vars.push({ id, name, kept, keepName });
+          if (kept) keptIds.add(id);
+          const cloud = isStr(name) && name.startsWith(CLOUD_PREFIX);
+          if ((keepName || cloud || !renameStores) && isStr(name)) keptVarNames.add(name);
         }
         for (const [id, ent] of Object.entries(isDict(tgt.lists) ? tgt.lists : {})) {
           if (dropL && dropL.has(id)) continue;
           const name = isArr(ent) && ent.length ? ent[0] : String(ent);
           const kept = keepL.has(id);
-          info.lists.push({ id, name, kept });
-          if (kept) {
-            keptIds.add(id);
-            if (isStr(name)) keptListNames.add(name);
-          }
+          const keepName = !renameStores && kept;
+          info.lists.push({ id, name, kept, keepName });
+          if (kept) keptIds.add(id);
+          if (keepName && isStr(name)) keptListNames.add(name);
         }
         if (tgt.isStage && !stageInfo) stageInfo = info;
         infos.push(info);
@@ -839,11 +878,20 @@
       };
 
       const assign = (info, reservedVars, reservedLists) => {
-        const gen = this._storeNameGenerators(reservedVars, reservedLists);
+        const nameReservedVars = new Set(reservedVars);
+        const nameReservedLists = new Set(reservedLists);
+        for (const e of info.vars) {
+          const cloud = isStr(e.name) && e.name.startsWith(CLOUD_PREFIX);
+          if ((e.keepName || cloud || !renameStores) && isStr(e.name)) nameReservedVars.add(e.name);
+        }
+        for (const e of info.lists) {
+          if ((e.keepName || !renameStores) && isStr(e.name)) nameReservedLists.add(e.name);
+        }
+        const gen = this._storeNameGenerators(nameReservedVars, nameReservedLists);
         const varNames = new Map();
         const listNames = new Map();
-        const finalVars = new Set(reservedVars);
-        const finalLists = new Set(reservedLists);
+        const finalVars = new Set(nameReservedVars);
+        const finalLists = new Set(nameReservedLists);
         for (const e of info.vars) {
           let name;
           // A cloud variable's name *is* its key on the cloud server
@@ -851,13 +899,13 @@
           // strands every value already stored for it -- a leaderboard reset.
           // The id is still shortened; only the visible name has to stay.
           const cloud = isStr(e.name) && e.name.startsWith(CLOUD_PREFIX);
-          if (e.kept || cloud || !renameStores) name = e.name;
+          if (e.keepName || cloud || !renameStores) name = e.name;
           else name = gen.nextVarName();
           varNames.set(e.id, name);
           if (isStr(name)) finalVars.add(name);
         }
         for (const e of info.lists) {
-          const name = e.kept || !renameStores ? e.name : gen.nextListName();
+          const name = e.keepName || !renameStores ? e.name : gen.nextListName();
           listNames.set(e.id, name);
           if (isStr(name)) finalLists.add(name);
         }
@@ -872,10 +920,11 @@
         const resVars = new Set(stageNames.finalVars);
         const resLists = new Set(stageNames.finalLists);
         for (const e of info.vars) {
-          if (e.kept && isStr(e.name)) resVars.add(e.name);
+          const cloud = isStr(e.name) && e.name.startsWith(CLOUD_PREFIX);
+          if ((e.keepName || cloud || !renameStores) && isStr(e.name)) resVars.add(e.name);
         }
         for (const e of info.lists) {
-          if (e.kept && isStr(e.name)) resLists.add(e.name);
+          if ((e.keepName || !renameStores) && isStr(e.name)) resLists.add(e.name);
         }
         assign(info, resVars, resLists);
       }
@@ -1054,8 +1103,8 @@
     // `_collect` numbers every store, including the ones that `removeUnused`
     // is about to drop, so a survivor could inherit "Bb" merely because 50
     // dropped stores were numbered before it.  Once the drop set is known,
-    // number the survivors again: kept monitor stores still keep their id and
-    // name, everything else is packed into the shortest free strings.  Only
+    // number the survivors again: kept monitor stores retain their IDs; names follow renameStores, and
+    // all other stores are packed into the shortest free strings.  Only
     // the rename maps change here; the store tables are rewritten later by
     // `_renameStores`.
     _compactStoreMappings(targets) {
@@ -5955,19 +6004,21 @@
           const pkey = op === "data_variable" ? "VARIABLE" : "LIST";
           const pname = (mon.params || {})[pkey];
           const mid = mon.id;
-          let m = isStr(mid) ? table.get(mid) : null;
-          if (!m && pname !== null && pname !== undefined) {
-            // Names may repeat in different targets, so resolve a monitor by
-            // its own sprite first, then the stage, then the global fallback.
-            const mname = isStr(mon.spriteName) ? mon.spriteName : this.stageName;
-            const localScope = op === "data_variable"
-              ? this.varByTarget.get(mname) : this.listByTarget.get(mname);
-            const stageScope = op === "data_variable"
-              ? this.varByTarget.get(this.stageName) : this.listByTarget.get(this.stageName);
+          const mname = isStr(mon.spriteName) && mon.spriteName !== "_stage_" ? mon.spriteName : this.stageName;
+          const localScope = op === "data_variable"
+            ? this.varByTarget.get(mname) : this.listByTarget.get(mname);
+          const stageScope = op === "data_variable"
+            ? this.varByTarget.get(this.stageName) : this.listByTarget.get(this.stageName);
+          let m = null;
+          if (pname !== null && pname !== undefined) {
+            // Resolve by target scope before the global ID map: Scratch IDs can
+            // be reused by different sprites, while monitor params carry the
+            // sprite name needed to select the correct store mapping.
             m = (localScope && localScope.get(pname)) ||
               (mname !== this.stageName && stageScope && stageScope.get(pname)) ||
               byname.get(pname);
           }
+          if (!m && isStr(mid)) m = table.get(mid);
           if (m) {
             const before = mon.id;
             const beforeName = (mon.params || {})[pkey];
