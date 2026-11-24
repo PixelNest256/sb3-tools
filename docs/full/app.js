@@ -243,7 +243,7 @@
     "dropObscuredShadows", "removeUnreachable", "extractDuplicates", "nearDuplicates",
     "loopDuplicates", "inlineSingleCall", "removeNoops", "simplifyIfElse",
     "reuseReporters",
-    "compressProcs", "freqIds", "foldConstants", "propagateConstants",
+    "compressProcs", "freqIds", "foldConstants", "aggressiveFoldConstants", "propagateConstants",
     "removeDeadAssets", "removeWriteOnly", "removeDuplicateAssignments", "removeEmptyIfs", "counterLoopToForEach", "normalizeTypes",
     "stripNullFieldIds", "zeroTopLevelCoords", "stripComments"
   ];
@@ -400,7 +400,14 @@
     });
     return out;
   }
-  function applyProjectOptions(values) {
+  function syncAggressiveFoldOption() {
+ var fold = document.querySelector("input[data-popt=foldConstants]");
+ var risky = document.querySelector("input[data-popt=aggressiveFoldConstants]");
+ if (!risky) return;
+ risky.disabled = !fold || !fold.checked;
+ if (risky.disabled) risky.checked = false;
+ }
+ function applyProjectOptions(values) {
     projectInputs.forEach(function (input) {
       var key = input.getAttribute("data-popt");
       input.checked = values[key] === true;
@@ -419,6 +426,7 @@
     out.removeDuplicateAssignments = false;
     out.removeEmptyIfs = false;
     out.counterLoopToForEach = false;
+ out.aggressiveFoldConstants = false;
     out.normalizeTypes = false;
     out.zeroTopLevelCoords = false;
     out.stripComments = false;
@@ -466,6 +474,7 @@
     });
     if (!preset) return;
     applyProjectOptions(presetValues(preset.keys));
+ syncAggressiveFoldOption();
     updatePresetUI();
     saveJSON(PROJECT_KEY, readProjectOptions());
     setMessage(fmt(L.presetApplied, { name: (button.textContent || "").trim() }), false);
@@ -1110,6 +1119,7 @@
 
   projectInputs.forEach(function (input) {
     input.addEventListener("change", function () {
+ syncAggressiveFoldOption();
       updatePresetUI();
       saveJSON(PROJECT_KEY, readProjectOptions());
       if (running) staleAfterRun = true; else markStale();
@@ -1130,6 +1140,7 @@
       b.setAttribute("aria-pressed", String(b.getAttribute("data-strength") === strength));
     });
     applyProjectOptions(defaultProjectOptions());
+ syncAggressiveFoldOption();
     applyMediaOptions({
       pngMode: "palette", svgToPng: true, minPx: true,
       wavToMp3: false, reencodeMp3: false, wavMp3Bitrate: 96, mp3Bitrate: 96
@@ -1185,6 +1196,7 @@
   applyMediaOptions(mediaStored);
   var projectStored = loadJSON(PROJECT_KEY, null);
   applyProjectOptions(projectStored ? Object.assign(defaultProjectOptions(), projectStored) : defaultProjectOptions());
+ syncAggressiveFoldOption();
   updatePresetUI();
   resetReadout();
 })();

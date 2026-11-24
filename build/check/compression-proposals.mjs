@@ -12,6 +12,7 @@ function block(opcode, inputs, parent = null) {
 }
 
 for (const [name, engine] of engines) {
+ assert.equal(new engine.Options({}).aggressiveFoldConstants,false,name+": approximate folding is off by default");
  const comp = new engine.Compressor({});
  // Store-name shortening must update every ID/name reference and respect
  // sensing_of name-only lookups, including dynamic OBJECT reporters.
@@ -88,7 +89,9 @@ for (const [name, engine] of engines) {
  STRING2: [1, [10, "cd"]]
  }, "length")
  };
+ const nestedBeforeSize = JSON.stringify(nested).length;
  comp._foldNumeric(nested);
+ assert.ok(JSON.stringify(nested).length < nestedBeforeSize, name + ": constant folding must reduce serialized block JSON");
  assert.deepEqual(nested.say.inputs.MESSAGE, [1, [4, "4"]], name + ": nested join + length");
  assert.equal("length" in nested, false, name + ": remove folded length");
  assert.equal("join" in nested, false, name + ": remove folded join");
@@ -253,10 +256,8 @@ for (const [name, engine] of engines) {
  for (const [operator, input, expected] of [
  ["sin", "30", Math.sin(Math.PI / 6)],
  ["cos", "60", Math.cos(Math.PI / 3)],
- ["asin", "0.5", 30],
  ["ln", "1", 0],
  ["log", "100", 2],
- ["e ^", "1", Math.E],
  ["10 ^", "2", 100]
  ]) {
  const math = {
@@ -268,6 +269,141 @@ for (const [name, engine] of engines) {
  assert.ok(Math.abs(Number(math.say.inputs.MESSAGE[1][1]) - expected) < 1e-12,
  name + ": mathop " + operator);
  }
+ const asinBlocks={say:block("looks_say",{MESSAGE:[3,"asin",[10,""]]}),asin:{...block("operator_mathop",{NUM:[1,[4,"0.5"]]},"say"),fields:{OPERATOR:["asin",null]}}};
+ comp._foldNumeric(asinBlocks);
+ assert.ok(asinBlocks.asin,name+": skip long decimal mathop result by default");
+ const aggressiveMathComp=new engine.Compressor({aggressiveFoldConstants:true});
+ const eBlocks={say:block("looks_say",{MESSAGE:[3,"e",[10,""]]}),e:{...block("operator_mathop",{NUM:[1,[4,"1"]]},"say"),fields:{OPERATOR:["e ^",null]}}};
+ aggressiveMathComp._foldNumeric(eBlocks);
+ assert.ok(!eBlocks.e,name+": aggressive mode folds long e^x result");
+ aggressiveMathComp._foldNumeric(asinBlocks);
+ assert.ok(!asinBlocks.asin,name+": fold long decimal mathop result in aggressive mode");
+
+ const decimalBlocks={say:{...block("looks_say",{MESSAGE:[3,"sum",[10,""]]})},sum:block("operator_add",{NUM1:[3,"third",[10,""]],NUM2:[3,"five",[10,""]]},"say"),third:block("operator_divide",{NUM1:[1,[4,"1"]],NUM2:[1,[4,"3"]]},"sum"),five:block("operator_add",{NUM1:[1,[4,"2"]],NUM2:[1,[4,"3"]]},"sum")};
+ comp._foldNumeric(decimalBlocks);
+ assert.ok(decimalBlocks.third,name+": skip only the non-terminating decimal subexpression");
+ assert.deepEqual(decimalBlocks.sum.inputs.NUM2,[1,[4,"5"]],name+": still fold an independent exact subexpression");
+ const aggressiveDecimalComp=new engine.Compressor({aggressiveFoldConstants:true});
+ aggressiveDecimalComp._foldNumeric(decimalBlocks);
+ assert.ok(!decimalBlocks.third,name+": aggressive mode continues folding the repeating decimal");
+
+ // Variable-dependent multiplicative chains should collapse only when the
+ // resulting coefficient is short enough for the conservative mode.
+ const factorBlocks = {
+ say: block("looks_say", {MESSAGE:[3,"outer",[10,""]]}),
+ outer: block("operator_multiply", {NUM1:[3,"inner",[10,""]],NUM2:[1,[4,"3"]]}, "say"),
+ inner: block("operator_divide", {NUM1:[3,"variable",[10,""]],NUM2:[1,[4,"2"]]}, "outer"),
+ variable: block("data_variable", {}, "inner")
+ };
+ const factorBeforeSize = JSON.stringify(factorBlocks).length;
+ comp._foldNumericFactors(factorBlocks);
+ assert.ok(JSON.stringify(factorBlocks).length < factorBeforeSize, name + ": factor folding must reduce serialized block JSON");
+ assert.equal(factorBlocks.outer.inputs.NUM1[1],"variable",name+": combine ((x / 2) * 3)");
+ assert.equal(factorBlocks.outer.inputs.NUM2[1][1],"1.5",name+": exact short coefficient");
+ assert.ok(!factorBlocks.inner,name+": remove the now-redundant intermediate reporter");
+ const pipelineProject={targets:[{isStage:true,name:"Stage",variables:{x:["x",4]},lists:{},broadcasts:{},blocks:{
+ hat:{...block("event_whenflagclicked",{}),topLevel:true,next:"say"},
+ say:{...block("looks_say",{MESSAGE:[3,"outer",[10,""]]},"hat"),next:null},
+ outer:block("operator_multiply",{NUM1:[3,"inner",[10,""]],NUM2:[1,[4,"3"]]},"say"),
+ inner:block("operator_divide",{NUM1:[3,"variable",[10,""]],NUM2:[1,[4,"2"]]},"outer"),
+ variable:block("sensing_answer",{},"inner")
+ },comments:{},costumes:[],sounds:[],currentCostume:0}] ,monitors:[],extensions:[],meta:{}};
+ const pipelineResult=engine.compressProject(JSON.parse(JSON.stringify(pipelineProject)),new engine.Options({foldConstants:true,aggressiveFoldConstants:false,removeUnused:false}));
+ const pipelineBlocks=pipelineResult.project.targets[0].blocks;
+ assert.ok(Object.values(pipelineBlocks).some(b=>b.opcode==="operator_multiply"&&b.inputs&&b.inputs.NUM2&&b.inputs.NUM2[1][1]==="1.5"),name+": factor folding runs through compressProject pipeline");
+ assert.equal(Object.values(pipelineBlocks).filter(b=>b.opcode==="operator_divide").length,0,name+": pipeline removes the intermediate arithmetic reporter");
+ assert.ok(pipelineResult.stats.const_values_folded>=1,name+": pipeline records algebraic folding");
+ const disabledPipeline=engine.compressProject(JSON.parse(JSON.stringify(pipelineProject)),new engine.Options({foldConstants:false,aggressiveFoldConstants:true,removeUnused:false}));
+ assert.equal(Object.values(disabledPipeline.project.targets[0].blocks).filter(b=>b.opcode==="operator_divide").length,1,name+": aggressive option cannot run when constant folding is disabled");
+
+
+
+ const negativeZero = {
+ say:block("looks_say",{MESSAGE:[3,"outer",[10,""]]}),
+ outer:block("operator_multiply",{NUM1:[3,"inner",[10,""]],NUM2:[1,[4,"-0"]]},"say"),
+ inner:block("operator_divide",{NUM1:[3,"variable",[10,""]],NUM2:[1,[4,"2"]]},"outer"),
+ variable:block("data_variable",{},"inner")
+ };
+ comp._foldNumericFactors(negativeZero);
+ assert.equal(negativeZero.outer.inputs.NUM2[1][1],"-0",name+": preserve negative zero in coefficients");
+ assert.ok(!negativeZero.inner,name+": negative-zero coefficient chain is folded");
+
+ const repeating = {
+ say: block("looks_say", {MESSAGE:[3,"outer",[10,""]]}),
+ outer: block("operator_multiply", {NUM1:[3,"inner",[10,""]],NUM2:[1,[4,"2"]]}, "say"),
+ inner: block("operator_divide", {NUM1:[3,"variable",[10,""]],NUM2:[1,[4,"3"]]}, "outer"),
+ variable: block("data_variable", {}, "inner")
+ };
+ comp._foldNumericFactors(repeating);
+ assert.ok(repeating.inner,name+": skip long repeating coefficients by default");
+ const riskyComp = new engine.Compressor({aggressiveFoldConstants:true});
+ riskyComp._foldNumericFactors(repeating);
+ assert.ok(!repeating.inner,name+": permit long coefficient only in aggressive mode");
+ assert.equal(Number(repeating.outer.inputs.NUM2[1][1]),2/3,name+": aggressive coefficient value");
+
+ // Scratch comparison and boolean primitives fold in ordinary reporter inputs.
+ const compareBlocks = {
+ say:block("looks_say",{MESSAGE:[3,"eq",[10,""]]}),
+ eq:block("operator_equals",{OPERAND1:[1,[10,"A"]],OPERAND2:[1,[10,"a"]]},"say")
+ };
+ comp._foldNumeric(compareBlocks);
+ assert.ok(compareBlocks.eq,name+": preserve boolean reporter type in string contexts");
+ assert.equal(comp._constantBooleanBlock(compareBlocks,"eq",new Set()),true,name+": case-insensitive Scratch equality is available to conditional folding");
+ const notBlocks={say:block("looks_say",{MESSAGE:[3,"not",[10,""]]}),not:block("operator_not",{OPERAND:[1,[10,"0"]]},"say")};
+ comp._foldNumeric(notBlocks);
+ assert.ok(notBlocks.not,name+": preserve boolean reporter type in string contexts");
+ assert.equal(comp._constantBooleanBlock(notBlocks,"not",new Set()),true,name+": Scratch not(false) evaluates true in conditions");
+ const conditionBlocks={hat:{...block("event_whenflagclicked",{}),topLevel:true,next:"if"},if:block("control_if",{CONDITION:[2,"cond"]},"hat"),cond:block("operator_equals",{OPERAND1:[1,[10,"A"]],OPERAND2:[1,[10,"a"]]},"if")};
+ comp._foldNumeric(conditionBlocks);
+ assert.ok(conditionBlocks.cond,name+": keep boolean condition reporter as a typed block");
+ assert.equal(comp._constantBooleanBlock(conditionBlocks,"cond",new Set()),true,name+": fold string comparison conditions safely");
+
+ // A second reference prevents deleting a shared intermediate block.
+ const shared = {
+ say: block("looks_say", {MESSAGE:[3,"outer",[10,""]]}),
+ outer: block("operator_multiply", {NUM1:[3,"inner",[10,""]],NUM2:[1,[4,"3"]]}, "say"),
+ inner: block("operator_divide", {NUM1:[3,"variable",[10,""]],NUM2:[1,[4,"2"]]}, "outer"),
+ variable: block("data_variable", {}, "inner"),
+ other: block("looks_say", {MESSAGE:[3,"inner",[10,""]]})
+ };
+ comp._foldNumericFactors(shared);
+ assert.ok(shared.inner,name+": keep shared intermediate reporter");
+
+ const sharedBase = {
+ say:block("looks_say",{MESSAGE:[3,"outer",[10,""]]}),
+ outer:block("operator_multiply",{NUM1:[3,"inner",[10,""]],NUM2:[1,[4,"3"]]},"say"),
+ inner:block("operator_divide",{NUM1:[3,"variable",[10,""]],NUM2:[1,[4,"2"]]},"outer"),
+ variable:block("data_variable",{},"inner"),
+ other:block("looks_say",{MESSAGE:[3,"variable",[10,""]]})
+ };
+ comp._foldNumericFactors(sharedBase);
+ assert.ok(sharedBase.inner,name+": preserve a base reporter shared by another script");
+
+ const reachComp = new engine.Compressor({});
+ const reachProject = {targets:[{blocks:{
+ hat:{...block("event_whenflagclicked",{}),topLevel:true,next:"loose"},
+ say:{...block("looks_say",{MESSAGE:[3,"used",[10,""]]},"loose"),next:"say2"},
+ say2:block("looks_say",{MESSAGE:[3,"shared",[10,""]]},"say"),
+ used:{...block("operator_add",{NUM1:[1,[4,"1"]],NUM2:[1,[4,"2"]]}),topLevel:true},
+ floating:{...block("operator_add",{NUM1:[3,"innerFloat",[10,""]],NUM2:[1,[4,"4"]]}),topLevel:true},
+ deadStack:{...block("looks_say",{MESSAGE:[3,"deadNested",[10,""]]}),topLevel:true},
+ deadNested:block("operator_add",{NUM1:[3,"deadLeaf",[10,""]],NUM2:[1,[4,"2"]]},"deadStack"),
+ deadLeaf:block("sensing_answer",{},"deadNested"),
+ innerFloat:block("operator_multiply",{NUM1:[3,"varFloat",[10,""]],NUM2:[1,[4,"2"]]},"floating"),
+ varFloat:block("data_variable",{},"innerFloat"),
+ floatingShared:{...block("operator_add",{NUM1:[3,"shared",[10,""]],NUM2:[1,[4,"4"]]}),topLevel:true},
+ shared:block("data_variable",{},"floatingShared"),
+ loose:{...block("looks_say",{MESSAGE:[1,[10,"standalone stack"]]}),topLevel:true,next:"say"}
+ },comments:{floatingComment:{blockId:"floating",text:"orphan",x:0,y:0,width:100,height:40,minimized:false}}}]};
+ reachComp._removeUnreachable(reachProject);
+ const remaining=reachProject.targets[0].blocks;
+ assert.ok(remaining.used,name+": keep referenced top-level reporter");
+ assert.ok(!remaining.floating && !remaining.innerFloat && !remaining.varFloat,name+": remove detached reporter island and nested children");
+ assert.ok(!remaining.deadStack && !remaining.deadNested && !remaining.deadLeaf,name+": remove reporter islands orphaned by a deleted parent stack");
+ assert.ok(!reachProject.targets[0].comments.floatingComment,name+": remove comments attached to deleted reporter islands");
+ assert.ok(remaining.floatingShared && remaining.shared,name+": preserve a reporter island with a child shared by a live script");
+ assert.ok(remaining.loose,name+": never delete a standalone stack command");
+
 }
 
 console.log("compression proposal constant-folding checks passed");

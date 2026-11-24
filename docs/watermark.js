@@ -39,7 +39,7 @@
     "propagateConstants", "reuseReporters", "stripComments", "compactWorkspace",
     "removeDeadAssets", "removeWriteOnly", "normalizeTypes", "stripNullFieldIds",
     "zeroTopLevelCoords", "compactMenuShadows",
-    "removeDuplicateAssignments", "removeEmptyIfs", "counterLoopToForEach"
+    "removeDuplicateAssignments", "removeEmptyIfs", "counterLoopToForEach", "aggressiveFoldConstants"
   ];
 
   // The full compressor has a second group of boolean media options.  The

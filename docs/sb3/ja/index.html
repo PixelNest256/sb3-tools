@@ -161,7 +161,7 @@
             <label class="opt" title="変数名・リスト名の表示文字列を短縮します。内部ID短縮が必要です。ID参照、静的な sensing_of の参照名、モニター参照は更新し、対象スプライトが動的に決まる sensing_of で使われる名前は参照を保つため変更しません。"><input type="checkbox" checked data-opt="renameStores"><span>変数・リスト名も短縮</span></label>
             <label class="opt" title="出現頻度の高いブロック種別に短い内部 ID を割り当て、project.json 内で繰り返される文字数を減らします。"><input type="checkbox" checked data-opt="freqIds"><span>頻出ブロックを短い ID に</span></label>
             <label class="opt" title="カスタムブロックの定義名・呼び出し情報に含まれる名前を短縮します。表示されるブロック名も変わる場合があります。"><input type="checkbox" checked data-opt="compressProcs"><span>カスタムブロック名を短縮</span></label>
-            <label class="opt" title="入力がすべて定数の式を事前に計算し、式ブロックを計算結果に置き換えます。"><input type="checkbox" checked data-opt="foldConstants"><span>定数計算を畳み込む</span></label>
+            <label class="opt" title="定数部分式に加え、変数を含む式の安全な代数的変形や係数の統合も行います。"><input type="checkbox" checked data-opt="foldConstants"><span>定数計算を畳み込む</span></label>
             <label class="opt" title="値が変化しないと解析で証明できる変数の読み取りを、その定数値に置き換えます。"><input type="checkbox" checked data-opt="propagateConstants"><span>定数変数を値に置換</span></label>
             <label class="opt" title="非表示の変数・リストモニターと保存位置を削除します。表示中のモニターは残りますが、設定や保存値は失われる場合があります。"><input type="checkbox" data-opt="removeMonitors"><span>モニターと位置を保持しない</span></label>
           </fieldset>
@@ -169,7 +169,8 @@
           <fieldset class="opt-group opt-group--danger">
             <legend>危険</legend>
             <p class="danger-note">保存値やフィールドの形を書き換えます。最大プリセットではオフです。必要な場合だけオンにして、動作を確認してください。</p>
-            <label class="opt" title="読み取られる前に必ず上書きされると判定した初期値を空にします。保存データを書き換えるため、必ず動作を確認してください。"><input type="checkbox" data-opt="clearInitialValues"><span>上書きされる初期値を空にする</span></label>
+            <label class="opt" title="循環小数や小数点以下11桁以上の計算結果も畳み込みます。浮動小数点の結果がわずかに変わる可能性があります。定数計算が有効な場合のみ使用できます。"><input type="checkbox" data-opt="aggressiveFoldConstants" disabled><span>近似値での畳み込みを許可</span></label>
+ <label class="opt" title="読み取られる前に必ず上書きされると判定した初期値を空にします。保存データを書き換えるため、必ず動作を確認してください。"><input type="checkbox" data-opt="clearInitialValues"><span>上書きされる初期値を空にする</span></label>
             <label class="opt" title="保存値の一部を標準的な JSON 型・表現に書き換えます。元の表現に依存するプロジェクトや拡張機能では問題が起きる可能性があります。"><input type="checkbox" data-opt="normalizeTypes"><span>型と表現を正規化</span></label>
             <label class="opt" title="ブロックフィールドにある null 値の ID 項目を削除します。保存されるフィールド構造が変わるため、利用する環境で確認してください。"><input type="checkbox" data-opt="stripNullFieldIds"><span>null のフィールドIDを削除</span></label>
           </fieldset>

@@ -308,6 +308,7 @@
     removeNoops: true,
     inlineSingleCall: true,
     foldConstants: true,
+    aggressiveFoldConstants: false,
     loopDuplicates: true,
     propagateConstants: true,
     reuseReporters: true,
@@ -1550,7 +1551,69 @@
         }
       });
 
-      const usedBcIds = new Set(sentIds);
+      // Delete detached reporter islands, including nested reporters. Shared children keep the island intact.
+      for (const tgt of targets) {
+        if (!isDict(tgt) || !isDict(tgt.blocks)) continue;
+        const blocks = tgt.blocks;
+        const incoming = new Map();
+        for (const [parentId, blk] of Object.entries(blocks)) {
+          if (!isDict(blk)) continue;
+          for (const entry of Object.values(blk.inputs || {})) {
+            if (!isArr(entry)) continue;
+            for (let i = 1; i < entry.length; i++) {
+              const childId = entry[i];
+              if (isStr(childId) && has(blocks, childId)) {
+                if (!incoming.has(childId)) incoming.set(childId, new Set());
+                incoming.get(childId).add(parentId);
+              }
+            }
+          }
+        }
+        const isReporter = blk => {
+          if (!isDict(blk)) return false;
+          const op = blk.opcode || "";
+          return op.startsWith("operator_") || DATA_REPORTER_OPS.has(op) ||
+          REUSE_REPORTER_OPS.has(op) || op.endsWith("_menu");
+        };
+        const roots = Object.entries(blocks).filter(([id, blk]) =>
+        isReporter(blk) && (blk.topLevel === true || blk.parent == null) &&
+        !(incoming.get(id) && incoming.get(id).size)
+        );
+        for (const [rootId] of roots) {
+          if (!has(blocks, rootId)) continue;
+          const island = new Set();
+          const pending = [rootId];
+          while (pending.length) {
+            const id = pending.pop();
+            if (island.has(id) || !isReporter(blocks[id])) continue;
+            island.add(id);
+            for (const entry of Object.values(blocks[id].inputs || {})) {
+              if (!isArr(entry)) continue;
+              for (let i = 1; i < entry.length; i++) {
+                const childId = entry[i];
+                if (isStr(childId) && isReporter(blocks[childId])) pending.push(childId);
+              }
+            }
+          }
+          const shared = [...island].some(id =>
+          [...(incoming.get(id) || [])].some(parentId => !island.has(parentId))
+          );
+          if (shared) continue;
+          for (const id of island) {
+            delete blocks[id];
+            st.unreachable_blocks_removed++;
+          }
+          if (isDict(tgt.comments)) {
+            for (const [commentId, comment] of Object.entries(tgt.comments)) {
+              if (isDict(comment) && isStr(comment.blockId) && island.has(comment.blockId)) {
+                delete tgt.comments[commentId];
+                st.unreachable_comments_removed++;
+              }
+            }
+          }
+        }
+      }
+const usedBcIds = new Set(sentIds);
       const usedBcNames = new Set(sentNames);
       blocksByTi.forEach((blocks, ti) => {
         for (const [bid, blk] of Object.entries(blocks)) {
@@ -2114,6 +2177,7 @@
         for (const tgt of targets) {
           if (isDict(tgt) && isDict(tgt.blocks) && Object.keys(tgt.blocks).length) {
             this._foldNumeric(tgt.blocks);
+            this._foldNumericFactors(tgt.blocks, tgt.comments);
             this._foldConstantConditionals(tgt.blocks);
           }
         }
@@ -2795,24 +2859,42 @@
         const value = this._literalNumber(inputs.NUM);
         return value === null ? null : Math.round(value);
       }
-      if (op === "operator_mathop") {
+      if (op === "operator_lt" || op === "operator_equals" || op === "operator_gt") {
+ const a = this._literalString(inputs.OPERAND1), b = this._literalString(inputs.OPERAND2);
+ if (a === null || b === null) return null;
+ const na = Number(a), nb = Number(b);
+ const white = value => value === null || value.trim() === "";
+ let c;
+ if (Number.isNaN(na) || Number.isNaN(nb) || (na === 0 && white(a)) || (nb === 0 && white(b))) {
+ const x = a.toLowerCase(), y = b.toLowerCase();
+ c = x < y ? -1 : x > y ? 1 : 0;
+ } else if ((na === Infinity && nb === Infinity) || (na === -Infinity && nb === -Infinity)) c = 0;
+ else c = na - nb;
+ return op === "operator_lt" ? c < 0 : op === "operator_gt" ? c > 0 : c === 0;
+ }
+ if (op === "operator_mathop") {
         if (!("NUM" in inputs)) return null;
         const value = this._literalNumber(inputs.NUM);
         if (value === null) return null;
         const fv = (blk.fields || {}).OPERATOR;
-        const name = isArr(fv) && fv.length ? fv[0] : null;
+        const name = isArr(fv) && fv.length ? String(fv[0]).toLowerCase() : null;
         if (name === "abs") return Math.abs(value);
         if (name === "floor") return Math.floor(value);
         if (name === "ceiling") return Math.ceil(value);
         if (name === "sqrt") return Math.sqrt(value);
-        if (name === "sin") return Math.sin(value * Math.PI / 180);
-        if (name === "cos") return Math.cos(value * Math.PI / 180);
-        if (name === "tan") return Math.tan(value * Math.PI / 180);
+        if (name === "sin") return parseFloat(Math.sin((Math.PI * value) / 180).toFixed(10));
+        if (name === "cos") return parseFloat(Math.cos((Math.PI * value) / 180).toFixed(10));
+        if (name === "tan") {
+ const angle = value % 360;
+ if (angle === 90 || angle === -270) return Infinity;
+ if (angle === -90 || angle === 270) return -Infinity;
+ return parseFloat(Math.tan((Math.PI * angle) / 180).toFixed(10));
+ }
         if (name === "asin") return Math.asin(value) * 180 / Math.PI;
         if (name === "acos") return Math.acos(value) * 180 / Math.PI;
         if (name === "atan") return Math.atan(value) * 180 / Math.PI;
         if (name === "ln") return Math.log(value);
-        if (name === "log") return Math.log10(value);
+        if (name === "log") return Math.log(value) / Math.LN10;
         if (name === "e ^") return Math.exp(value);
         if (name === "10 ^") return Math.pow(10, value);
         return null;
@@ -2832,14 +2914,121 @@
         if (!("LETTER" in inputs) || !("STRING" in inputs)) return null;
         const index = this._literalNumber(inputs.LETTER);
         const value = this._literalString(inputs.STRING);
-        if (index === null || value === null || index < 1 || index > value.length) return null;
-        return value.charAt(index - 1);
+        if (index === null || value === null) return null;
+ const position = index - 1;
+ return position < 0 || position >= value.length ? "" : value.charAt(position);
       }
       return null;
     }
 
+    _foldNumericFactors(blocks, comments) {
+      const approximate = this.options.aggressiveFoldConstants === true;
+      const numberOf = entry => {
+        if (!isArr(entry) || entry.length < 2) return null;
+        const value = entry[1];
+        if (isArr(value) && value.length >= 2 && (isStr(value[1]) || typeof value[1] === "number")) {
+          const n = Number(value[1]);
+          return Number.isFinite(n) ? n : null;
+        }
+        return typeof value === "number" && Number.isFinite(value) ? value : null;
+      };
+      const decimalText = value => {
+        if (!Number.isFinite(value)) return null;
+        const text = Object.is(value, -0) ? "-0" : String(value);
+        if (/e/i.test(text)) {
+ const fixed = value.toFixed(10);
+ if (Number(fixed) === value) return fixed;
+ return approximate ? text : null;
+ }
+        const decimals = (text.split(".")[1] || "").length;
+        return decimals <= 10 || approximate ? text : null;
+      };
+      const extract = (id, seen = new Set()) => {
+        if (!isStr(id) || seen.has(id)) return null;
+        seen.add(id);
+        const block = blocks[id];
+        if (!isDict(block) || (block.opcode !== "operator_multiply" && block.opcode !== "operator_divide")) {
+          return {
+            base:id, coefficient:1, depth:0, removed:[]};
+        }
+        const inputs = block.inputs || {
+        };
+        const left = inputs.NUM1, right = inputs.NUM2;
+        const leftValue = numberOf(left), rightValue = numberOf(right);
+        const leftId = isArr(left) && isStr(left[1]) ? left[1] : null;
+        const rightId = isArr(right) && isStr(right[1]) ? right[1] : null;
+        if (leftId && rightValue !== null) {
+          const nested = extract(leftId, new Set(seen));
+          if (nested) {
+            const coefficient = block.opcode === "operator_multiply" ? nested.coefficient * rightValue : nested.coefficient / rightValue;
+            if (Number.isFinite(coefficient)) return {
+              base:nested.base, coefficient, depth:nested.depth + 1, removed:[...nested.removed, id] };
+          }
+        }
+        if (block.opcode === "operator_multiply" && rightId && leftValue !== null) {
+          const nested = extract(rightId, new Set(seen));
+          if (nested) {
+            const coefficient = nested.coefficient * leftValue;
+            if (Number.isFinite(coefficient)) return {
+              base:nested.base, coefficient, depth:nested.depth + 1, removed:[...nested.removed, id] };
+          }
+        }
+        return {
+          base:id, coefficient:1, depth:0, removed:[]};
+      };
+      const refs = new Map();
+      for (const block of Object.values(blocks)) {
+        if (!isDict(block)) continue;
+        for (const entry of Object.values(block.inputs || {})) {
+          if (!isArr(entry)) continue;
+          for (let i = 1; i < entry.length; i++) {
+            if (isStr(entry[i])) refs.set(entry[i], (refs.get(entry[i]) || 0) + 1);
+          }
+        }
+      }
+      let changed = true;
+      let guard = 0;
+      while (changed && guard++ < 500) {
+        changed = false;
+        for (const [id, block] of Object.entries(blocks)) {
+          if (!isDict(block) || block.topLevel === true || (block.opcode !== "operator_multiply" && block.opcode !== "operator_divide")) continue;
+          const result = extract(id);
+          if (!result || result.depth < 2 || !Number.isFinite(result.coefficient)) continue;
+          const text = decimalText(result.coefficient);
+          if (text === null || text.length > 64 || !isDict(blocks[result.base])) continue;
+          if ((refs.get(result.base) || 0) !== 1 || blocks[result.base].topLevel === true) continue;
+          if (result.removed.some(childId => childId !== id && (refs.get(childId) || 0) !== 1)) continue;
+          if (isDict(comments) && Object.values(comments).some(comment => isDict(comment) && result.removed.some(childId => comment.blockId === childId))) continue;
+          const before = JSON.stringify(blocks);
+          const trial = JSON.parse(before);
+          const trialBlock = trial[id];
+          trialBlock.opcode = "operator_multiply";
+          trialBlock.inputs = {
+            NUM1:[3,result.base,[10,""]],NUM2:[1,[4,text]]};
+          trial[result.base].parent = id;
+          for (const childId of result.removed) {
+            if (childId !== id) delete trial[childId];
+          }
+          if (JSON.stringify(trial).length >= before.length) continue;
+          for (const key of Object.keys(blocks)) delete blocks[key];
+          Object.assign(blocks, trial);
+          this.stats.const_values_folded += 1;
+          changed = true;
+          break;
+        }
+      }
+    }
     _foldNumeric(blocks) {
  const st = this.stats;
+ const approximate = this.options.aggressiveFoldConstants === true;
+ const shortDecimal = text => {
+ if (text === "Infinity" || text === "-Infinity") return true;
+ if (/e/i.test(text)) {
+ const value = Number(text);
+ return approximate || Number(value.toFixed(10)) === value;
+ }
+ return (text.split(".")[1] || "").length <= 10 || approximate;
+ };
  const foldable = new Set([
  "operator_add", "operator_subtract", "operator_multiply", "operator_divide",
  "operator_mod", "operator_round", "operator_mathop", "operator_join",
@@ -2879,17 +3068,29 @@
  primitive = [10, value];
  } else {
  const text = jsNumberStr(value);
- if (text === null || text.length > 64) continue;
+ if (text === null || text.length > 64 || !shortDecimal(text)) continue;
  primitive = [4, text];
  }
- parent.inputs[key] = [1, primitive];
- for (const x of this._collectSubgraph(blocks, cid, false)) {
- delete blocks[x];
- refs.delete(x);
- }
- st.const_values_folded += 1;
- changed = true;
- break;
+ const before = JSON.stringify(blocks);
+        const trial = JSON.parse(before);
+        trial[pid].inputs[key] = [1, primitive];
+        for (const x of this._collectSubgraph(blocks, cid, false)) delete trial[x];
+        if (JSON.stringify(trial).length >= before.length) continue;
+        for (const blockId of Object.keys(blocks)) delete blocks[blockId];
+        Object.assign(blocks, trial);
+        refs.clear();
+        for (const blk of Object.values(blocks)) {
+          if (!isDict(blk)) continue;
+          for (const value of Object.values(blk.inputs || {})) {
+            if (!isArr(value)) continue;
+            for (let i = 1; i < value.length; i++) {
+              if (isStr(value[i])) refs.set(value[i], (refs.get(value[i]) || 0) + 1);
+            }
+          }
+        }
+        st.const_values_folded += 1;
+        changed = true;
+        break;
  }
  if (changed) break;
  }
@@ -2910,7 +3111,11 @@
         if (isStr(id) && has(blocks, id)) return this._constantBooleanBlock(blocks, id, seen);
       }
       const item = entry[1];
-      if (isArr(item) && item.length >= 2 && [4, 5, 6, 7, 8].includes(item[0])) {
+      if (isArr(item) && item.length >= 2 && [4, 5, 6, 7, 8, 10].includes(item[0])) {
+        if (item[0] === 10) {
+          const text = String(item[1]);
+          return !(text === "" || text === "0" || text.toLowerCase() === "false");
+        }
         return jsToNumber(item[1]) !== 0;
       }
       if (typeof item === "number") return jsToNumber(item) !== 0;
@@ -2934,17 +3139,11 @@
       };
       const boolean = (key) => key in inputs ? this._constantBooleanInput(blocks, inputs[key], seen) : null;
       switch (blk.opcode) {
-        case "operator_equals": {
-          const a = number("OPERAND1"), b = number("OPERAND2");
-          return a === null || b === null ? null : a === b;
-        }
-        case "operator_gt": {
-          const a = number("OPERAND1"), b = number("OPERAND2");
-          return a === null || b === null ? null : a > b;
-        }
+        case "operator_equals":
+        case "operator_gt":
         case "operator_lt": {
-          const a = number("OPERAND1"), b = number("OPERAND2");
-          return a === null || b === null ? null : a < b;
+          const value = this._evalFoldable(blk);
+          return typeof value === "boolean" ? value : null;
         }
         case "operator_contains": {
           const first = this._literalString(inputs.STRING1);

@@ -779,11 +779,7 @@ function buildStopMergeProject() {
       parent: hat,
       inputs: { CONDITION: [2, cond], SUBSTACK: [2, first] }
     });
-    blocks[cond] = blk("operator_equals", {
-      parent: root,
-      inputs: { OPERAND1: [1, [10, tag]], OPERAND2: [1, [10, "x"]] }
-    });
-    let prev = null;
+    const variable = "stopVar" + tag; blocks[cond] = blk("operator_equals", { parent: root, inputs: { OPERAND1: [3, variable, [10, ""]], OPERAND2: [1, [10, tag]] } }); blocks[variable] = blk("sensing_answer", { parent: cond });  let prev = null;
     for (let i = 1; i <= 12; i++) {
       const id = `stopSay${tag}${i}`;
       // `sharedBody` keeps the two stop-free scripts identical apart from the
@@ -813,7 +809,7 @@ function buildStopMergeProject() {
   return {
     targets: [{
       isStage: false, name: "Sprite1",
-      variables: {}, lists: {}, broadcasts: {},
+      variables: { value: ["value", "x"] }, lists: {}, broadcasts: {},
       blocks,
       comments: {},
       currentCostume: 0,

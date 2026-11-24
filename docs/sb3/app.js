@@ -254,6 +254,7 @@
     removeNoops: true,
     inlineSingleCall: true,
     foldConstants: true,
+ aggressiveFoldConstants: false,
     loopDuplicates: true,
     propagateConstants: true,
     reuseReporters: true,
@@ -458,7 +459,15 @@
     });
   }
 
-  function saveOptions() {
+  function syncAggressiveFoldOption() {
+ var fold = document.querySelector("input[data-opt=foldConstants]");
+ var risky = document.querySelector("input[data-opt=aggressiveFoldConstants]");
+ if (!risky) return;
+ risky.disabled = !fold || !fold.checked;
+ if (risky.disabled) risky.checked = false;
+ }
+
+ function saveOptions() {
     try {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(readOptions()));
     } catch (_) {
@@ -516,6 +525,7 @@
     });
     if (!preset) return;
     applyOptions(presetValues(preset.keys));
+ syncAggressiveFoldOption();
     updatePresetUI();
     markStale();
     setMessage(fmt(L.presetApplied, {
@@ -1045,6 +1055,7 @@
 
   optionInputs.forEach(function (input) {
     input.addEventListener("change", function () {
+ syncAggressiveFoldOption();
       markStale();
       updatePresetUI();
     });
@@ -1058,6 +1069,7 @@
 
   el.resetOptions.addEventListener("click", function () {
     applyOptions(DEFAULTS);
+ syncAggressiveFoldOption();
     updatePresetUI();
     saveOptions();
     markStale();
@@ -1115,6 +1127,7 @@
   }
 
   applyOptions(mergedOptions());
+ syncAggressiveFoldOption();
   updatePresetUI();
   resetReadout();
   el.stats.hidden = true;
