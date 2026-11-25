@@ -191,11 +191,12 @@ for (const [name, engine] of engines) {
  }];
  comp.storePlanByTarget = new Map();
  comp._compactBroadcasts(staticBroadcasts);
- assert.notEqual(comp.bcMap.get("longId")[1], "A very long broadcast label",
- name + ": shorten static broadcast label");
+ assert.equal(comp.bcMap.get("longId")[1], "A very long broadcast label",
+ name + ": preserve broadcast display labels while shortening IDs");
+ assert.notEqual(comp.bcMap.get("longId")[0], "longId", name + ": still shorten broadcast IDs");
  assert.equal(comp.bcMap.get("longId")[1], comp.bcMap.get("secondId")[1],
  name + ": preserve duplicate broadcast-name equivalence");
- assert.equal(comp.stats.broadcast_names_renamed, 1, name + ": count shortened broadcast names");
+ assert.equal(comp.stats.broadcast_names_renamed, 0, name + ": do not shorten broadcast display labels");
 
 
  const unknownIdBroadcasts = [{
@@ -227,8 +228,8 @@ for (const [name, engine] of engines) {
  })
  }
  }]);
- assert.notEqual(collision.bcMap.get("longId")[1], "A",
- name + ": avoid collision with a variable name");
+ assert.equal(collision.bcMap.get("longId")[1], "A very long broadcast label",
+ name + ": preserve broadcast label regardless of variable names");
 
  const dynamicBroadcasts = [{
  broadcasts: {longId: ["A very long broadcast label"]},

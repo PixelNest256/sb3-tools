@@ -1027,65 +1027,8 @@
         return id;
       };
 
-      // A reporter-connected broadcast input can produce any message at runtime.
-      // Keep every visible label in that case; only shorten names when all senders
-      // can be resolved to a literal menu value.
-      const knownBroadcastIds = new Set();
-      for (const target of targets) {
-        const definitions = isDict(target) && isDict(target.broadcasts) ? target.broadcasts : {};
-        for (const id of Object.keys(definitions)) knownBroadcastIds.add(id);
-      }
-      let canShortenNames = this.options.renameStores !== false;
-      for (const tgt of targets) {
-        if (!isDict(tgt) || !isDict(tgt.blocks)) continue;
-        for (const blk of Object.values(tgt.blocks)) {
-          if (!isDict(blk) || (blk.opcode !== "event_broadcast" &&
-              blk.opcode !== "event_broadcastandwait")) continue;
-          const input = (blk.inputs || {}).BROADCAST_INPUT;
-          if (!isArr(input) || input.length < 2) {
-            canShortenNames = false;
-            break;
-          }
-          const value = input[1];
-          if (isArr(value)) {
-            if (value[0] !== 11 || !isStr(value[1]) ||
-                (isStr(value[2]) && !knownBroadcastIds.has(value[2]))) canShortenNames = false;
-          } else if (isStr(value)) {
-            const menu = tgt.blocks[value];
- const field = menu && menu.opcode === "event_broadcast_menu"
-                ? (menu.fields || {}).BROADCAST_OPTION : null;
-            if (!isArr(field) || !isStr(field[0]) ||
-                (isStr(field[1]) && !knownBroadcastIds.has(field[1]))) canShortenNames = false;
-          } else {
-            canShortenNames = false;
-          }
-          if (!canShortenNames) break;
-        }
-        if (!canShortenNames) break;
-      }
-
-      const shortNames = new Map();
-      const occupiedNames = new Set();
-      for (const mapping of this.varMap.values()) occupiedNames.add(mapping[1]);
-      for (const mapping of this.listMap.values()) occupiedNames.add(mapping[1]);
-      for (const plan of this.storePlanByTarget.values()) {
-        for (const mapping of plan.varMap.values()) occupiedNames.add(mapping[1]);
-        for (const mapping of plan.listMap.values()) occupiedNames.add(mapping[1]);
-      }
-      let nameSeq = 0;
-      const nextName = (name) => {
-        if (!canShortenNames || !isStr(name)) return name;
-        if (!shortNames.has(name)) {
-          let candidate;
-          do {
-            candidate = encodeId(++nameSeq);
-          } while (occupiedNames.has(candidate));
-          occupiedNames.add(candidate);
-          shortNames.set(name, candidate);
-        }
-        return shortNames.get(name);
-      };
-
+      // `renameStores` only shortens variables and lists. Broadcast labels are
+      // used by name-based dispatch and are preserved; their IDs remain compact.
       this.bcMap = new Map();
       this.bcByName = new Map();
       for (const tgt of targets) {
@@ -1094,13 +1037,13 @@
         for (const [bid, ent] of Object.entries(broadcasts)) {
           const name = isArr(ent) && ent.length ? ent[0] : ent;
           const short = nextId();
-          const mapping = [short, nextName(name)];
+          const mapping = [short, name];
           this.bcMap.set(bid, mapping);
           if (!this.bcByName.has(name)) this.bcByName.set(name, mapping);
         }
       }
       this.stats.broadcasts_renamed = this.bcMap.size;
-      this.stats.broadcast_names_renamed = canShortenNames ? shortNames.size : 0;
+      this.stats.broadcast_names_renamed = 0;
     }
 
     // `_collect` numbers every store, including the ones that `removeUnused`

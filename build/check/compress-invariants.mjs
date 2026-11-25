@@ -2428,12 +2428,11 @@ const recvBlock = Object.values(receiver.blocks).find((b) => b && b.opcode === "
 const sent = sendBlock.inputs.BROADCAST_INPUT[1];
 const received = recvBlock.fields.BROADCAST_OPTION;
 
-const shortBroadcastName = sent[1];
-check(typeof shortBroadcastName === "string" && shortBroadcastName !== "go" &&
- sent[2] === null && received[0] === shortBroadcastName &&
- Object.values(sender.broadcasts).every((b) => b[0] === shortBroadcastName) &&
- Object.values(receiver.broadcasts).every((b) => b[0] === shortBroadcastName),
- "shortened broadcast name broke name-only matching across workspaces");
+const preservedBroadcastName = sent[1];
+check(preservedBroadcastName === "go" && sent[2] === null && received[0] === preservedBroadcastName &&
+ Object.values(sender.broadcasts).every((b) => b[0] === preservedBroadcastName) &&
+ Object.values(receiver.broadcasts).every((b) => b[0] === preservedBroadcastName),
+ "renameStores changed a broadcast label used for name-only matching across workspaces");
 
 /*
  * 19. Scratch 3 core menu shadows and the Pen color-parameter menu are
@@ -2529,8 +2528,9 @@ const broadcastParent = Object.values(menuMatrixTarget.blocks).find((b) => b && 
 const broadcastPrimitive = broadcastParent.inputs.BROADCAST_INPUT[1];
 const compactedBroadcastName = Object.values(menuMatrixTarget.broadcasts)[0][0];
 check(broadcastPrimitive[0] === 11 && broadcastPrimitive[1] === compactedBroadcastName &&
- compactedBroadcastName !== "message-long-name" && typeof broadcastPrimitive[2] === "string",
- "event_broadcast_menu name or broadcast ID was not compacted consistently");
+ compactedBroadcastName === "message-long-name" && typeof broadcastPrimitive[2] === "string" &&
+ broadcastPrimitive[2] !== "broadcastLongId0001",
+ "event_broadcast_menu label should be preserved while its ID is compacted");
 check(menuCompressed.stats.menu_shadows_compacted === textMenuCases.length + 1,
   "menu shadow compaction statistics do not match the tested menu count");
 check(Object.values(menuMatrixTarget.blocks).some((b) => b && b.opcode === "custom_dropdown_menu") &&
