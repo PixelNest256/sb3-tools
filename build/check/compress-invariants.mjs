@@ -362,6 +362,45 @@ check(keptTarget.lists && keptTarget.lists[LID_DEAD] && keptTarget.lists[LID_DEA
 // Monitor store IDs remain stable while their display names are shortened.
 check(Object.keys(keptTarget.variables || {}).length === 2, "keeping monitors preserved a variable it should not have");
 
+// When Max removes hidden monitors, those monitors must not retain their stores,
+// even if renameStores is on. Visible monitor stores must still be kept and renamed.
+const hiddenMonitorProject = buildProject();
+hiddenMonitorProject.targets[0].variables.hiddenMonVar = ["hiddenMonitorVariable", 8];
+hiddenMonitorProject.targets[0].variables.visibleMonVar = ["visibleMonitorVariable", 9];
+hiddenMonitorProject.targets[0].lists.hiddenMonList = ["hiddenMonitorList", ["h"]];
+hiddenMonitorProject.targets[0].lists.visibleMonList = ["visibleMonitorList", ["v"]];
+hiddenMonitorProject.monitors = [
+  { id: "hiddenMonVar", opcode: "data_variable", params: { VARIABLE: "hiddenMonitorVariable" },
+    spriteName: "Sprite1", visible: false },
+  { id: "hiddenMonList", opcode: "data_listcontents", params: { LIST: "hiddenMonitorList" },
+    spriteName: "Sprite1", visible: false },
+  { id: "visibleMonVar", opcode: "data_variable", params: { VARIABLE: "visibleMonitorVariable" },
+    spriteName: "Sprite1", visible: true },
+  { id: "visibleMonList", opcode: "data_listcontents", params: { LIST: "visibleMonitorList" },
+    spriteName: "Sprite1", visible: true }
+];
+const hiddenMonitorOut = SB3.compressProject(hiddenMonitorProject,
+  new SB3.Options({ renameStores: true, removeMonitors: true, removeUnused: true }), () => {});
+const hmTarget = hiddenMonitorOut.project.targets[0];
+check((hiddenMonitorOut.project.monitors || []).length === 2,
+  `renameStores with removeMonitors kept ${(hiddenMonitorOut.project.monitors || []).length} monitors, expected only the 2 visible monitors`);
+check(!Object.values(hmTarget.variables || {}).some((entry) => entry[0] === "hiddenMonitorVariable"),
+  "a hidden monitor kept a variable store after monitor removal");
+check(!Object.values(hmTarget.lists || {}).some((entry) => entry[0] === "hiddenMonitorList"),
+  "a hidden monitor kept a list store after monitor removal");
+const hmVarMonitor = (hiddenMonitorOut.project.monitors || []).find((mon) => mon.opcode === "data_variable");
+const hmListMonitor = (hiddenMonitorOut.project.monitors || []).find((mon) => mon.opcode === "data_listcontents");
+check(hmVarMonitor && hmTarget.variables[hmVarMonitor.id] &&
+  hmTarget.variables[hmVarMonitor.id][0] === hmVarMonitor.params.VARIABLE &&
+  hmVarMonitor.params.VARIABLE !== "visibleMonitorVariable",
+  "a visible monitor's variable store was removed or not renamed consistently");
+check(hmListMonitor && hmTarget.lists[hmListMonitor.id] &&
+  hmTarget.lists[hmListMonitor.id][0] === hmListMonitor.params.LIST &&
+  hmListMonitor.params.LIST !== "visibleMonitorList",
+  "a visible monitor's list store was removed or not renamed consistently");
+check((hiddenMonitorOut.project.monitors || []).every((mon) => mon.visible !== false),
+  "a removed hidden monitor is still present in project.monitors");
+
 /*
  * stripDefaults must leave a type-correct cached value on every monitor. A
  * monitor shown from a script during a step is rendered from this cache before

@@ -439,7 +439,9 @@
       }
       const o = this.options;
       this.progress("collect", 0.0, "Collecting variables, lists, and broadcasts...");
-      this._collectMonitorStores(targets, project.monitors, o.removeMonitors && !o.renameStores);
+      // Hidden monitors removed later must not keep their backing stores alive.
+      // Visible monitors still need their stores, and their labels follow renameStores.
+      this._collectMonitorStores(targets, project.monitors, o.removeMonitors);
       if (o.dropObscuredShadows) this._dropObscuredShadows(targets);
       if (o.removeUnreachable) {
         this.progress("collect", 1.0, "Removing unreachable blocks and comments...");

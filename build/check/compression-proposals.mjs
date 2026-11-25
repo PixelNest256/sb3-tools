@@ -81,6 +81,31 @@ for (const [name, engine] of engines) {
  assert.equal(storeMonitors[2].params.VARIABLE,stageMap.get("S1")[1],name+": Stage monitor name follows renamed store");
  assert.ok(spriteA.lists[listMap[0]],name+": list table uses the new list ID");
 
+ // Max removes hidden monitors and their stores while retaining visible
+ // monitor stores; renameStores must still shorten the surviving names.
+ const monitorCleanupProject = {
+  targets:[{isStage:false,name:"MonitorCleanup",variables:{hiddenVar:["hiddenVariableName",1],visibleVar:["visibleVariableName",2],usedVar:["usedVariableName",0]},lists:{hiddenList:["hiddenListName",["h"]],visibleList:["visibleListName",["v"]]},broadcasts:{},blocks:{flag:{...block("event_whenflagclicked",{}),topLevel:true}},comments:{},currentCostume:0,costumes:[],sounds:[]}],
+  monitors:[
+   {id:"hiddenVar",opcode:"data_variable",params:{VARIABLE:"hiddenVariableName"},spriteName:"MonitorCleanup",visible:false},
+   {id:"hiddenList",opcode:"data_listcontents",params:{LIST:"hiddenListName"},spriteName:"MonitorCleanup",visible:false},
+   {id:"visibleVar",opcode:"data_variable",params:{VARIABLE:"visibleVariableName"},spriteName:"MonitorCleanup",visible:true},
+   {id:"visibleList",opcode:"data_listcontents",params:{LIST:"visibleListName"},spriteName:"MonitorCleanup",visible:true}
+  ],extensions:[],meta:{semver:"3.0.0"}
+ };
+ const monitorCleanup = engine.compressProject(monitorCleanupProject,
+  new engine.Options({renameStores:true,removeMonitors:true,removeUnused:true}),()=>{});
+ const monitorTarget = monitorCleanup.project.targets[0];
+ assert.equal(monitorCleanup.project.monitors.length,2,name+": remove hidden monitors but keep visible monitors");
+ assert.ok(!Object.values(monitorTarget.variables||{}).some(v=>v[0]==="hiddenVariableName"),name+": hidden monitor must not keep its variable store");
+ assert.ok(!Object.values(monitorTarget.lists||{}).some(v=>v[0]==="hiddenListName"),name+": hidden monitor must not keep its list store");
+ for(const mon of monitorCleanup.project.monitors){
+  const isVar=mon.opcode==="data_variable",table=isVar?monitorTarget.variables:monitorTarget.lists,key=isVar?"VARIABLE":"LIST";
+  const original=isVar?"visibleVariableName":"visibleListName";
+  assert.ok(table[mon.id],name+": visible monitor store is retained");
+  assert.equal(table[mon.id][0],mon.params[key],name+": visible monitor name matches its store");
+  assert.notEqual(mon.params[key],original,name+": visible monitor store name is shortened");
+ }
+
  const nested = {
  say: block("looks_say", {MESSAGE: [2, "length"]}),
  length: block("operator_length", {STRING: [1, "join"]}, "say"),
